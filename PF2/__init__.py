@@ -45,6 +45,7 @@ class PF2(Activity.Activity):
             "histogram",
             "layer_stack",
             "preview",
+            "preview_eventbox",
             "scroll_window",
             "open_button",
             "original_toggle",
@@ -141,6 +142,11 @@ class PF2(Activity.Activity):
         self.ui["undo"].connect("clicked", self.on_undo)
         self.ui["redo"].connect("clicked", self.on_redo)
         self.ui["reset"].connect("clicked", self.on_reset)
+
+        self.ui["preview_eventbox"].connect('motion-notify-event', self.foo)
+
+    def foo(self, widget, event):
+        print(event.x, event.y)
 
 
     def on_tool_button_clicked(self, sender):
