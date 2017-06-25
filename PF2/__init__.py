@@ -9,7 +9,7 @@ import numpy
 import getpass
 import os
 
-from PF2 import Histogram
+from PF2 import Histogram, Layer
 from PF2.Tools import BlackWhite
 from PF2.Tools import Colours
 from PF2.Tools import Contrast
@@ -49,7 +49,7 @@ class PF2(Activity.Activity):
             "scroll_window",
             "open_button",
             "original_toggle",
-            "tools",
+            "tool_box_stack",
             "tool_stack",
             "open_window",
             "open_header",
@@ -64,7 +64,11 @@ class PF2(Activity.Activity):
             "zoom_toggle",
             "zoom_reveal",
             "zoom",
-            "reset"
+            "reset",
+            "mask_draw_toggle",
+            "mask_erase_toggle",
+            "mask_brush_size",
+            "layers_list",
         ]
 
         for component in components:
@@ -74,26 +78,22 @@ class PF2(Activity.Activity):
 
         # Set up tools
         self.tools = [
-            Contrast.Contrast(),
-            Tonemap.Tonemap(),
-            Details.Details(),
-            Colours.Colours(),
-            HueEqualiser.HueEqualiser(),
-            BlackWhite.BlackWhite(),
+            Contrast.Contrast,
+            Tonemap.Tonemap,
+            Details.Details,
+            Colours.Colours,
+            HueEqualiser.HueEqualiser,
+            BlackWhite.BlackWhite
         ]
 
-        self.tool_map = {}
 
-        for tool in self.tools:
-            self.ui["tools"].add(tool.tool_button)
-            self.ui["tool_stack"].add(tool.widget)
-            self.tool_map[tool.tool_button] = tool
-            tool.tool_button.connect("clicked", self.on_tool_button_clicked)
-            tool.connect_on_change(self.on_tool_change)
+        # Setup layers
+        self.layers = []
+        self.base_layer = self.create_layer("base", True)
 
         # Set the first tool to active
-        self.tools[0].tool_button.set_active(True)
-        self.ui["tools"].show_all()
+        # self.tools[0].tool_button.set_active(True)
+        # self.ui["tools"].show_all()
 
         # Disable ui components by default
         self.ui["original_toggle"].set_sensitive(False)
@@ -143,21 +143,10 @@ class PF2(Activity.Activity):
         self.ui["redo"].connect("clicked", self.on_redo)
         self.ui["reset"].connect("clicked", self.on_reset)
 
-        self.ui["preview_eventbox"].connect('motion-notify-event', self.foo)
+        self.ui["preview_eventbox"].connect('motion-notify-event', self.preview_dragged)
+        self.ui["mask_draw_toggle"].connect("toggled", self.mask_draw_toggled)
+        self.ui["mask_erase_toggle"].connect("toggled", self.mask_erase_toggled)
 
-    def foo(self, widget, event):
-        print(event.x, event.y)
-
-
-    def on_tool_button_clicked(self, sender):
-        if(sender.get_active()):
-            self.ui["tool_stack"].set_visible_child(self.tool_map[sender].widget)
-            for key in self.tool_map:
-                if(key != sender):
-                    key.set_active(False)
-
-        elif(self.ui["tool_stack"].get_visible_child() == self.tool_map[sender].widget):
-            sender.set_active(True)
 
 
     def on_open_clicked(self, sender):
@@ -271,7 +260,7 @@ class PF2(Activity.Activity):
             self.ui["original_toggle"].set_active(False)
 
 
-    def on_tool_change(self, tool, property):
+    def on_layer_change(self, layer):
         if(self.has_loaded):
             if(not self.change_occurred):
                 self.change_occurred = True
@@ -426,14 +415,13 @@ class PF2(Activity.Activity):
     def run_stack(self, image, callback=None):
         if(not self.running_stack):
             self.running_stack = True
-            ntools = len(self.tools)
-            count = 1
-            for tool in self.tools:
-                if(callback != None):
-                    # For showing progress
-                    callback(tool.name, ntools, count-1)
-                image = tool.on_update(image)
-                count += 1
+
+            baseImage = image.copy()
+
+            for layer in self.layers:
+                print(layer)
+                image = layer.render_layer(baseImage, image, callback)
+
             self.running_stack = False
             return image
 
@@ -484,26 +472,22 @@ class PF2(Activity.Activity):
         print(path)
         f = open(path, "w")
 
-        toolDict = {}
-        for tool in self.tools:
-            toolDict[tool.id] = tool.get_properties_as_dict()
+        layerDict = {}
+        for layer in self.layers:
+            layerDict[layer.name] = layer.get_layer_dict()
 
         if(not self.undoing) and (self.has_loaded):
             if(len(self.undo_stack)-1 != self.undo_position):
                 self.undo_stack = self.undo_stack[:self.undo_position+1]
-            if(self.undo_stack[self.undo_position] != toolDict):
-                self.undo_stack += [toolDict,]
+            if(self.undo_stack[self.undo_position] != layerDict):
+                self.undo_stack += [layerDict,]
                 self.undo_position = len(self.undo_stack)-1
                 GLib.idle_add(self.update_undo_state)
 
         data = {
             "path":self.image_path,
             "format-revision":1,
-            "layers": {
-                "base":{
-                    "tools": toolDict
-                }
-            }
+            "layers": layerDict
         }
 
         f.write(str(data))
@@ -515,29 +499,34 @@ class PF2(Activity.Activity):
         if(os.path.exists(path)):
             f = open(path, 'r')
             sdata = f.read()
-            try:
+            if(True):
+            #try:
                 data = ast.literal_eval(sdata)
                 if(data["format-revision"] == 1):
-                    for tool in self.tools:
-                        if(tool.id in data["layers"]["base"]["tools"]):
-                            GLib.idle_add(tool.load_properties,data["layers"]["base"]["tools"][tool.id])
+                    for layer in data["layers"]:
+                        if(layer == "base"):
+                            self.base_layer.set_from_layer_dict(data["layers"][layer])
+                        else:
+                            ilayer = self.create_layer(layer, False)
+                            ilayer.set_from_layer_dict(data["layers"][layer])
 
-                    self.undo_stack = [data["layers"]["base"]["tools"],]
+                    self.undo_stack = [data["layers"],]
                     self.undo_position = 0
                     loadDefaults = False
-            except:
-                GLib.idle_add(self.show_message,"Unable to load previous edits…",
-                                                "The edit file for this photo is corrupted and could not be loaded.")
+            #except:
+            #    GLib.idle_add(self.show_message,"Unable to load previous edits…",
+            #                                    "The edit file for this photo is corrupted and could not be loaded.")
 
         if(loadDefaults):
-            for tool in self.tools:
-                GLib.idle_add(tool.reset)
+            for layer in self.layers:
+                for tool in layer.tools:
+                    GLib.idle_add(tool.reset)
 
-            toolDict = {}
-            for tool in self.tools:
-                toolDict[tool.id] = tool.get_properties_as_dict()
+            layerDict = {}
+            for layer in self.layers:
+                layerDict[layer.name] = layer.get_layer_dict()
 
-            self.undo_stack = [toolDict, ]
+            self.undo_stack = [layerDict, ]
             self.undo_position = 0
 
         GLib.idle_add(self.update_undo_state)
@@ -547,9 +536,13 @@ class PF2(Activity.Activity):
 
     def update_from_undo_stack(self, data):
         self.undoing = True
-        for tool in self.tools:
-            if (tool.id in data):
-                tool.load_properties(data[tool.id])
+        for layer in data:
+            if (layer == "base"):
+                self.base_layer.set_from_layer_dict(data[layer])
+            else:
+                ilayer = self.create_layer(layer, False)
+                ilayer.set_from_layer_dict(data[layer])
+
 
     def get_export_image(self, w, h):
         GLib.idle_add(self.on_export_started)
@@ -567,7 +560,44 @@ class PF2(Activity.Activity):
 
 
 
+    ## Layers Stuff ##
+
+    def preview_dragged(self, widget, event):
+        print(event.x, event.y)
+
+    def mask_draw_toggled(self, widget):
+        if(widget.get_active()):
+            self.ui["mask_erase_toggle"].set_active(False)
+
+    def mask_erase_toggled(self, widget):
+        if(widget.get_active()):
+            self.ui["mask_draw_toggle"].set_active(False)
 
 
+    def create_layer(self, layer_name, is_base):
+        layer = Layer.Layer(is_base, layer_name, self.on_layer_change)
+        for tool in self.tools:
+            tool_instance = tool()
+            layer.add_tool(tool_instance)
 
+        self.layers += [layer,]
 
+        self.create_layer_ui(layer)
+
+        return layer
+
+    def create_layer_ui(self, layer):
+        layer_box = Gtk.HBox()
+        layer_toggle = Gtk.CheckButton()
+        layer_toggle.set_sensitive(not layer.editable)
+        layer_toggle.set_active(layer.enabled)
+        layer_label = Gtk.Label()
+        layer_label.set_label(layer.name)
+
+        layer_box.add(layer_toggle)
+        layer_box.add(layer_label)
+
+        self.ui["layers_list"].add(layer_box)
+
+        self.ui["tool_box_stack"].add(layer.tool_box)
+        self.ui["tool_stack"].add(layer.tool_stack)
