@@ -315,7 +315,6 @@
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="transition_type">slide-up</property>
-                        <property name="reveal_child">True</property>
                         <child>
                           <object class="GtkBox">
                             <property name="visible">True</property>
@@ -338,7 +337,7 @@
                             </child>
                             <child>
                               <object class="GtkScrolledWindow">
-                                <property name="height_request">150</property>
+                                <property name="height_request">100</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">True</property>
                                 <property name="hscrollbar_policy">never</property>
@@ -363,6 +362,59 @@
                               </packing>
                             </child>
                             <child>
+                              <object class="GtkButtonBox">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="spacing">6</property>
+                                <property name="layout_style">end</property>
+                                <child>
+                                  <object class="GtkButton" id="PF2_add_layer_button">
+                                    <property name="visible">True</property>
+                                    <property name="can_focus">True</property>
+                                    <property name="receives_default">True</property>
+                                    <child>
+                                      <object class="GtkImage">
+                                        <property name="visible">True</property>
+                                        <property name="can_focus">False</property>
+                                        <property name="icon_name">list-add-symbolic</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                  <packing>
+                                    <property name="expand">False</property>
+                                    <property name="fill">False</property>
+                                    <property name="position">0</property>
+                                    <property name="non_homogeneous">True</property>
+                                  </packing>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="PF2_remove_layer_button">
+                                    <property name="visible">True</property>
+                                    <property name="can_focus">True</property>
+                                    <property name="receives_default">True</property>
+                                    <child>
+                                      <object class="GtkImage">
+                                        <property name="visible">True</property>
+                                        <property name="can_focus">False</property>
+                                        <property name="icon_name">list-remove-symbolic</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                  <packing>
+                                    <property name="expand">False</property>
+                                    <property name="fill">False</property>
+                                    <property name="position">1</property>
+                                    <property name="non_homogeneous">True</property>
+                                  </packing>
+                                </child>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">False</property>
+                                <property name="position">2</property>
+                              </packing>
+                            </child>
+                            <child>
                               <object class="GtkSeparator">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
@@ -370,7 +422,7 @@
                               <packing>
                                 <property name="expand">False</property>
                                 <property name="fill">True</property>
-                                <property name="position">2</property>
+                                <property name="position">3</property>
                               </packing>
                             </child>
                           </object>
@@ -387,7 +439,6 @@
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="transition_type">slide-up</property>
-                        <property name="reveal_child">True</property>
                         <child>
                           <object class="GtkBox">
                             <property name="visible">True</property>
@@ -547,6 +598,8 @@
                           <object class="GtkStack" id="PF2_tool_box_stack">
                             <property name="visible">True</property>
                             <property name="can_focus">False</property>
+                            <property name="halign">start</property>
+                            <property name="valign">start</property>
                             <property name="transition_type">crossfade</property>
                             <child>
                               <placeholder/>
@@ -593,7 +646,7 @@
                                 <property name="can_focus">False</property>
                                 <property name="hhomogeneous">False</property>
                                 <property name="vhomogeneous">False</property>
-                                <property name="transition_type">slide-left-right</property>
+                                <property name="transition_type">crossfade</property>
                                 <child>
                                   <placeholder/>
                                 </child>
@@ -733,6 +786,32 @@
           </packing>
         </child>
         <child>
+          <object class="GtkModelButton" id="PF2_new_layer">
+            <property name="visible">True</property>
+            <property name="sensitive">False</property>
+            <property name="can_focus">True</property>
+            <property name="receives_default">True</property>
+            <property name="tooltip_text" translatable="yes">Reset all settings for this image</property>
+            <property name="text" translatable="yes">New Layer</property>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="position">4</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkSeparator">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="position">5</property>
+          </packing>
+        </child>
+        <child>
           <object class="GtkModelButton" id="PF2_reset">
             <property name="visible">True</property>
             <property name="sensitive">False</property>
@@ -744,13 +823,12 @@
           <packing>
             <property name="expand">False</property>
             <property name="fill">True</property>
-            <property name="position">4</property>
+            <property name="position">6</property>
           </packing>
         </child>
       </object>
       <packing>
         <property name="submenu">main</property>
-        <property name="position">1</property>
       </packing>
     </child>
   </object>

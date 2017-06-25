@@ -69,6 +69,10 @@ class PF2(Activity.Activity):
             "mask_erase_toggle",
             "mask_brush_size",
             "layers_list",
+            "new_layer",
+            "layer_mask_reveal",
+            "add_layer_button",
+            "remove_layer_button"
         ]
 
         for component in components:
@@ -142,10 +146,14 @@ class PF2(Activity.Activity):
         self.ui["undo"].connect("clicked", self.on_undo)
         self.ui["redo"].connect("clicked", self.on_redo)
         self.ui["reset"].connect("clicked", self.on_reset)
-
         self.ui["preview_eventbox"].connect('motion-notify-event', self.preview_dragged)
         self.ui["mask_draw_toggle"].connect("toggled", self.mask_draw_toggled)
         self.ui["mask_erase_toggle"].connect("toggled", self.mask_erase_toggled)
+        self.ui["new_layer"].connect("clicked", self.new_layer_button_clicked)
+        self.ui["layers_list"].connect("row-activated", self.layer_ui_activated)
+        self.ui["add_layer_button"].connect("clicked", self.new_layer_button_clicked)
+        self.ui["remove_layer_button"].connect("clicked", self.remove_layer_button_clicked)
+
 
 
 
@@ -164,6 +172,8 @@ class PF2(Activity.Activity):
         self.ui["original_toggle"].set_sensitive(True)
         self.ui["export_image"].set_sensitive(True)
         self.ui["reset"].set_sensitive(True)
+        self.ui["new_layer"].set_sensitive(True)
+        self.ui["layers_reveal"].set_reveal_child(False)
         self.is_editing = True
         if(path == None):
             self.image_path = self.ui["open_chooser"].get_filename()
@@ -175,6 +185,15 @@ class PF2(Activity.Activity):
 
         self.show_message("Loading Photo…", "Please wait while PhotoFiddle loads your photo", True)
         self.root.get_titlebar().set_subtitle("%s…" % (self.image_path))
+
+        # Delete all layers, except the base
+        for layer in self.layers:
+            if(layer.name != "base"):
+                self.ui["layers_list"].remove(layer.selector_row)
+
+        self.layers = [self.base_layer,]
+
+        self.select_layer(self.base_layer)
 
         thread = threading.Thread(target=self.open_image,
                                   args=(w, h))
@@ -324,8 +343,8 @@ class PF2(Activity.Activity):
         self.update_from_undo_stack(self.undo_stack[self.undo_position])
 
     def on_reset(self, sender):
-        for tool in self.tools:
-            tool.reset()
+        for layer in self.layers:
+            layer.reset_tools()
 
 
 
@@ -504,11 +523,7 @@ class PF2(Activity.Activity):
                 data = ast.literal_eval(sdata)
                 if(data["format-revision"] == 1):
                     for layer in data["layers"]:
-                        if(layer == "base"):
-                            self.base_layer.set_from_layer_dict(data["layers"][layer])
-                        else:
-                            ilayer = self.create_layer(layer, False)
-                            ilayer.set_from_layer_dict(data["layers"][layer])
+                        GLib.idle_add(self.create_layer_with_data, layer, data["layers"][layer])
 
                     self.undo_stack = [data["layers"],]
                     self.undo_position = 0
@@ -532,6 +547,15 @@ class PF2(Activity.Activity):
         GLib.idle_add(self.update_undo_state)
         time.sleep(2)
         self.undoing = False
+
+
+    def create_layer_with_data(self, layer, data):
+        if (layer == "base"):
+            self.base_layer.set_from_layer_dict(data)
+        else:
+            GLib.idle_add(self.show_layers)
+            ilayer = self.create_layer(layer, False)
+            ilayer.set_from_layer_dict(data)
 
 
     def update_from_undo_stack(self, data):
@@ -582,22 +606,105 @@ class PF2(Activity.Activity):
 
         self.layers += [layer,]
 
-        self.create_layer_ui(layer)
+        GLib.idle_add(self.create_layer_ui, layer)
 
         return layer
 
     def create_layer_ui(self, layer):
         layer_box = Gtk.HBox()
+        layer_box.set_hexpand(False)
+        layer_box.set_halign(Gtk.Align.START)
+
         layer_toggle = Gtk.CheckButton()
-        layer_toggle.set_sensitive(not layer.editable)
+        layer_toggle.set_sensitive(layer.editable)
         layer_toggle.set_active(layer.enabled)
+        layer_toggle.set_hexpand(False)
+        layer_toggle.set_halign(Gtk.Align.START)
+        layer_toggle.set_margin_right(8)
+        layer_toggle.set_margin_left(8)
+        layer_toggle.set_margin_top(4)
+        layer_toggle.set_margin_bottom(4)
+
+
         layer_label = Gtk.Label()
         layer_label.set_label(layer.name)
+        layer_label.set_hexpand(True)
+        layer_label.set_halign(Gtk.Align.FILL)
+        layer_label.set_margin_top(4)
+        layer_label.set_margin_bottom(4)
 
         layer_box.add(layer_toggle)
         layer_box.add(layer_label)
 
+        layer.show_all()
+        layer_box.show_all()
+
         self.ui["layers_list"].add(layer_box)
+
+        layer.selector_row = layer_box.get_parent()
 
         self.ui["tool_box_stack"].add(layer.tool_box)
         self.ui["tool_stack"].add(layer.tool_stack)
+
+
+    def layer_ui_activated(self, widget, row):
+        layer_index = row.get_index()
+        self.ui["tool_stack"].set_visible_child(self.layers[layer_index].tool_stack)
+        self.ui["tool_box_stack"].set_visible_child(self.layers[layer_index].tool_box)
+        self.ui["layer_mask_reveal"].set_reveal_child(self.layers[layer_index].editable)
+        self.ui["remove_layer_button"].set_sensitive(self.layers[layer_index].editable)
+
+
+    def new_layer_button_clicked(self, widget):
+        self.show_layers()
+        # Allocate an un-used layer name
+        layer_number = len(self.layers)
+        layer_name = "Layer %i" % layer_number
+
+        while(self.layer_exists(layer_name)):
+            layer_number += 1
+            layer_name = "Layer %i" % layer_number
+
+        # Create the layer
+        layer = self.create_layer(layer_name, False)
+
+        # Save changes
+        threading.Thread(target=self.save_image_data).start()
+
+
+    def remove_layer_button_clicked(self, widget):
+        layer_row = self.ui["layers_list"].get_selected_row()
+
+        selected_index = 1
+
+        new_layers = []
+        for layer in self.layers:
+            if(layer.selector_row != layer_row):
+                new_layers += [layer]
+            else:
+                selected_index = self.layers.index(layer)
+
+        self.ui["layers_list"].remove(layer_row)
+        self.layers = new_layers
+
+        # Select next layer
+        self.select_layer(self.layers[selected_index -1])
+
+        if(len(self.layers) == 1):
+            self.ui["layers_reveal"].set_reveal_child(False)
+
+        # Save changes
+        threading.Thread(target=self.save_image_data).start()
+
+    def layer_exists(self, layer_name):
+        for layer in self.layers:
+            if(layer.name == layer_name):
+                return True
+        return False
+
+    def show_layers(self):
+        self.ui["layers_reveal"].set_reveal_child(True)
+
+    def select_layer(self, layer):
+        self.ui["layers_list"].select_row(layer.selector_row)
+        self.layer_ui_activated(self.ui["layers_list"], layer.selector_row)

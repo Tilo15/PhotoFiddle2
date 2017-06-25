@@ -2,6 +2,7 @@ from gi.repository import Gtk, GLib
 
 class Layer:
     def __init__(self, base, name, on_change):
+        print("init", name)
         self.mask = []
         self.tools = []
         self.tool_map = {}
@@ -9,13 +10,22 @@ class Layer:
         self.enabled = True
         self.selected_tool = 0
         self.editable = not base
+
+        self.selector_row = None
+
         self.tool_box = Gtk.FlowBox()
+        self.tool_box.set_orientation(1)
+
         self.tool_stack = Gtk.Stack()
+        self.tool_stack.set_transition_type(6)
+        self.tool_stack.set_homogeneous(False)
+
 
         self.layer_changed = on_change
 
 
     def add_tool(self, tool):
+        print("add tool", tool)
         self.tool_box.add(tool.tool_button)
         self.tool_stack.add(tool.widget)
         self.tool_map[tool.tool_button] = tool
@@ -24,6 +34,9 @@ class Layer:
         tool.connect_on_change(self.on_tool_change)
 
         self.tools += [tool,]
+
+        if(len(self.tools) == 1):
+            tool.tool_button.set_active(True)
 
 
     def on_tool_change(self, tool, prop):
@@ -56,6 +69,7 @@ class Layer:
         return layerDict
 
     def set_from_layer_dict(self, dict):
+        print("set_from_layer_dict", dict)
         # Load Tool Data
         for tool in self.tools:
             if(tool.id in dict["tools"]):
@@ -91,11 +105,24 @@ class Layer:
                 layer = tool.on_update(layer)
                 count += 1
 
+            image = layer
+
         ## Here we would blend with the mask
-        image = layer
 
         return image
 
 
+    def show_all(self):
 
+        self.tool_box.show_all()
+        self.tool_stack.show_all()
+
+        for tool in self.tools:
+            tool.widget.show_all()
+            tool.tool_button.show_all()
+
+
+    def reset_tools(self):
+        for tool in self.tools:
+            tool.reset()
 

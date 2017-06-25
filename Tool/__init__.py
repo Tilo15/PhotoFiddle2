@@ -34,7 +34,6 @@ class Tool:
                     # Add a Separator
                     separator = Gtk.Separator()
                     separator.set_margin_top(6)
-                    separator.show()
                     self.widget.attach(separator, 0, vpos, 3, 1)
                     vpos += 1
 
@@ -159,10 +158,7 @@ class Tool:
 
         separator = Gtk.Separator()
         separator.set_margin_top(6)
-        separator.show()
         self.widget.attach(separator, 0, vpos, 3, 1)
-
-        self.widget.show_all()
 
         self.tool_button = Gtk.ToggleButton()
         self.tool_button.set_tooltip_text(self.name)
