@@ -116,11 +116,17 @@
             <property name="visible">True</property>
             <property name="can_focus">False</property>
             <child>
-              <object class="GtkImage" id="PF2_preview">
+              <object class="GtkEventBox" id="PF2_preview_eventbox">
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
-                <property name="hexpand">True</property>
-                <property name="pixbuf">logo.png</property>
+                <child>
+                  <object class="GtkImage" id="PF2_preview">
+                    <property name="visible">True</property>
+                    <property name="can_focus">False</property>
+                    <property name="hexpand">True</property>
+                    <property name="pixbuf">logo.png</property>
+                  </object>
+                </child>
               </object>
             </child>
           </object>
