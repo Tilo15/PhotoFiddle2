@@ -37,6 +37,7 @@ class PF2(Activity.Activity):
         # Get all UI Components
         self.ui = {}
         components = [
+            "main",
             "control_reveal",
             "histogram_reveal",
             "layers_reveal",
@@ -72,7 +73,12 @@ class PF2(Activity.Activity):
             "new_layer",
             "layer_mask_reveal",
             "add_layer_button",
-            "remove_layer_button"
+            "remove_layer_button",
+            "mask_brush_feather",
+            "mask_brush_feather_scale",
+            "edit_layer_mask_button",
+            "layer_opacity",
+            "layer_opacity_scale"
         ]
 
         for component in components:
@@ -109,6 +115,7 @@ class PF2(Activity.Activity):
         self.image_path = ""
         self.bit_depth = 8
         self.image = None
+        self.image_is_dirty = True
         self.original_image = None
         self.pwidth = 0
         self.pheight = 0
@@ -126,6 +133,10 @@ class PF2(Activity.Activity):
         self.undo_stack = []
         self.undo_position = 0
         self.undoing = False
+        self.current_layer_path = None
+        self.mousex = 0
+        self.mousey = 0
+        self.layer_order = []
 
         # Setup Open Dialog
         self.ui["open_window"].set_transient_for(self.root)
@@ -147,13 +158,18 @@ class PF2(Activity.Activity):
         self.ui["redo"].connect("clicked", self.on_redo)
         self.ui["reset"].connect("clicked", self.on_reset)
         self.ui["preview_eventbox"].connect('motion-notify-event', self.preview_dragged)
+        self.ui["preview_eventbox"].connect('button-press-event', self.new_path)
         self.ui["mask_draw_toggle"].connect("toggled", self.mask_draw_toggled)
         self.ui["mask_erase_toggle"].connect("toggled", self.mask_erase_toggled)
         self.ui["new_layer"].connect("clicked", self.new_layer_button_clicked)
         self.ui["layers_list"].connect("row-activated", self.layer_ui_activated)
         self.ui["add_layer_button"].connect("clicked", self.new_layer_button_clicked)
         self.ui["remove_layer_button"].connect("clicked", self.remove_layer_button_clicked)
-
+        self.ui["edit_layer_mask_button"].connect("toggled", self.edit_mask_toggled)
+        self.ui["layer_opacity"].connect("value-changed", self.update_layer_opacity)
+        self.ui["scroll_window"].connect_after("draw", self.draw_ui_brush_circle)
+        self.ui["scroll_window"].connect('motion-notify-event', self.mouse_coords_changed)
+        self.ui["mask_brush_size"].connect("value-changed", self.brush_size_changed)
 
 
 
@@ -402,6 +418,8 @@ class PF2(Activity.Activity):
         # Resize OPENCV Copy
         self.original_image = cv2.resize(self.original_image, (int(nw), int(nh)), interpolation = cv2.INTER_AREA)
 
+        self.image_is_dirty = True
+
         self.image = numpy.copy(self.original_image)
 
         # Update image
@@ -416,8 +434,10 @@ class PF2(Activity.Activity):
             time.sleep(0.5)
         self.additional_change_occurred = False
         GLib.idle_add(self.start_work)
+        self.image_is_dirty = True
         self.image = numpy.copy(self.original_image)
         self.image = self.run_stack(self.image)
+        self.image_is_dirty = False
         if(self.additional_change_occurred):
             self.update_image()
         else:
@@ -492,8 +512,10 @@ class PF2(Activity.Activity):
         f = open(path, "w")
 
         layerDict = {}
+        layerOrder = []
         for layer in self.layers:
             layerDict[layer.name] = layer.get_layer_dict()
+            layerOrder.append(layer.name)
 
         if(not self.undoing) and (self.has_loaded):
             if(len(self.undo_stack)-1 != self.undo_position):
@@ -503,10 +525,12 @@ class PF2(Activity.Activity):
                 self.undo_position = len(self.undo_stack)-1
                 GLib.idle_add(self.update_undo_state)
 
+
         data = {
             "path":self.image_path,
             "format-revision":1,
-            "layers": layerDict
+            "layers": layerDict,
+            "layer-order": layerOrder
         }
 
         f.write(str(data))
@@ -518,19 +542,21 @@ class PF2(Activity.Activity):
         if(os.path.exists(path)):
             f = open(path, 'r')
             sdata = f.read()
-            if(True):
-            #try:
+            try:
                 data = ast.literal_eval(sdata)
                 if(data["format-revision"] == 1):
-                    for layer in data["layers"]:
-                        GLib.idle_add(self.create_layer_with_data, layer, data["layers"][layer])
+                    if("layer-order" not in data):
+                        # Backwards compatability
+                        data["layer-order"] = ["base",]
+                    for layer_name in data["layer-order"]:
+                        GLib.idle_add(self.create_layer_with_data, layer_name, data["layers"][layer_name])
 
-                    self.undo_stack = [data["layers"],]
+                    self.undo_stack = [data,]
                     self.undo_position = 0
                     loadDefaults = False
-            #except:
-            #    GLib.idle_add(self.show_message,"Unable to load previous edits…",
-            #                                    "The edit file for this photo is corrupted and could not be loaded.")
+            except:
+                GLib.idle_add(self.show_message,"Unable to load previous edits…",
+                                                "The edit file for this photo is corrupted and could not be loaded.")
 
         if(loadDefaults):
             for layer in self.layers:
@@ -538,10 +564,13 @@ class PF2(Activity.Activity):
                     GLib.idle_add(tool.reset)
 
             layerDict = {}
+            layerOrder = []
             for layer in self.layers:
                 layerDict[layer.name] = layer.get_layer_dict()
+                layerOrder.append(layer.name)
 
-            self.undo_stack = [layerDict, ]
+
+            self.undo_stack = [{"layers": layerDict, "layer-order": layerOrder}, ]
             self.undo_position = 0
 
         GLib.idle_add(self.update_undo_state)
@@ -560,12 +589,14 @@ class PF2(Activity.Activity):
 
     def update_from_undo_stack(self, data):
         self.undoing = True
-        for layer in data:
-            if (layer == "base"):
-                self.base_layer.set_from_layer_dict(data[layer])
+        self.delete_all_editable_layers()
+        for layer_name in data["layer-order"]:
+            if (layer_name == "base"):
+                self.base_layer.set_from_layer_dict(data["layers"][layer_name])
             else:
-                ilayer = self.create_layer(layer, False)
-                ilayer.set_from_layer_dict(data[layer])
+                ilayer = self.create_layer(layer_name, False)
+                ilayer.set_from_layer_dict(data["layers"][layer_name])
+                self.show_layers()
 
 
     def get_export_image(self, w, h):
@@ -587,15 +618,77 @@ class PF2(Activity.Activity):
     ## Layers Stuff ##
 
     def preview_dragged(self, widget, event):
-        print(event.x, event.y)
+
+        x, y = widget.translate_coordinates(self.ui["preview"], event.x, event.y)
+
+        draw = self.ui["mask_draw_toggle"].get_active()
+        erase = self.ui["mask_erase_toggle"].get_active()
+        layer = self.get_selected_layer()
+        if((draw or erase) and layer.editable and self.current_layer_path):
+
+            if (x < 0.0):
+                x = 0
+            if (y < 0.0):
+                y = 0
+
+            pwidth = self.pimage.get_width()
+            pheight = self.pimage.get_height()
+
+            if (x > pwidth):
+                x = pwidth
+            if (y > pheight):
+                y = pheight
+
+            print(x, y)
+
+            if(not self.image_is_dirty):
+                fill = (0, 0, 255)
+                if(erase):
+                    fill = (255, 0, 0)
+
+                preview = self.current_layer_path.add_point(int(x), int(y), (pheight, pwidth, 3), fill)
+
+                # Bits per pixel
+                bpp = float(str(self.image.dtype).replace("uint", "").replace("float", ""))
+                # Pixel value range
+                np = float(2 ** bpp - 1)
+
+                self.image[preview == 255] = np
+                cv2.imwrite("/tmp/phf2-preview-%s-drag.png" % getpass.getuser(), self.image)
+                temppbuf = GdkPixbuf.Pixbuf.new_from_file("/tmp/phf2-preview-%s-drag.png" % getpass.getuser())
+                self.ui["preview"].set_from_pixbuf(temppbuf)
+
+            self.on_layer_change(layer)
+
+    def new_path(self, widget, event):
+        draw = self.ui["mask_draw_toggle"].get_active()
+        erase = self.ui["mask_erase_toggle"].get_active()
+        layer = self.get_selected_layer()
+        if((draw or erase) and layer.editable):
+            print(self.pimage.get_width(), self.pimage.get_height())
+            width = self.pimage.get_width()
+            size = self.ui["mask_brush_size"].get_value()
+            feather = self.ui["mask_brush_feather"].get_value()
+            self.current_layer_path = layer.mask.get_new_path(size, feather, float(self.awidth)/float(width), draw)
+
 
     def mask_draw_toggled(self, widget):
-        if(widget.get_active()):
-            self.ui["mask_erase_toggle"].set_active(False)
+        self.ui["mask_erase_toggle"].set_active(not widget.get_active())
 
     def mask_erase_toggled(self, widget):
-        if(widget.get_active()):
-            self.ui["mask_draw_toggle"].set_active(False)
+        self.ui["mask_draw_toggle"].set_active(not widget.get_active())
+        self.ui["mask_brush_feather_scale"].set_sensitive(not widget.get_active())
+
+
+    def edit_mask_toggled(self, widget):
+        self.ui["layer_mask_reveal"].set_reveal_child(widget.get_active())
+        self.ui["mask_draw_toggle"].set_active(widget.get_active())
+        self.ui["mask_erase_toggle"].set_active(False)
+        self.ui["scroll_window"].queue_draw()
+
+    def update_layer_opacity(self, sender):
+        layer = self.get_selected_layer()
+        layer.set_opacity(sender.get_value())
 
 
     def create_layer(self, layer_name, is_base):
@@ -624,7 +717,7 @@ class PF2(Activity.Activity):
         layer_toggle.set_margin_left(8)
         layer_toggle.set_margin_top(4)
         layer_toggle.set_margin_bottom(4)
-
+        layer_toggle.connect("toggled", self.toggle_layer, layer)
 
         layer_label = Gtk.Label()
         layer_label.set_label(layer.name)
@@ -651,8 +744,15 @@ class PF2(Activity.Activity):
         layer_index = row.get_index()
         self.ui["tool_stack"].set_visible_child(self.layers[layer_index].tool_stack)
         self.ui["tool_box_stack"].set_visible_child(self.layers[layer_index].tool_box)
-        self.ui["layer_mask_reveal"].set_reveal_child(self.layers[layer_index].editable)
         self.ui["remove_layer_button"].set_sensitive(self.layers[layer_index].editable)
+        self.ui["edit_layer_mask_button"].set_sensitive(self.layers[layer_index].editable)
+        self.ui["layer_opacity_scale"].set_sensitive(self.layers[layer_index].editable)
+        self.ui["layer_opacity"].set_value(self.layers[layer_index].opacity)
+        if(self.ui["edit_layer_mask_button"].get_active()):
+            self.ui["edit_layer_mask_button"].set_active(self.layers[layer_index].editable)
+
+    def toggle_layer(self, sender, layer):
+        layer.set_enabled(sender.get_active())
 
 
     def new_layer_button_clicked(self, widget):
@@ -667,9 +767,11 @@ class PF2(Activity.Activity):
 
         # Create the layer
         layer = self.create_layer(layer_name, False)
+        layer.set_size(self.awidth, self.aheight)
 
         # Save changes
         threading.Thread(target=self.save_image_data).start()
+        self.on_layer_change(layer)
 
 
     def remove_layer_button_clicked(self, widget):
@@ -690,11 +792,25 @@ class PF2(Activity.Activity):
         # Select next layer
         self.select_layer(self.layers[selected_index -1])
 
-        if(len(self.layers) == 1):
+        if (len(self.layers) == 1):
             self.ui["layers_reveal"].set_reveal_child(False)
 
-        # Save changes
-        threading.Thread(target=self.save_image_data).start()
+        if(widget != None):
+            # Only do this if the layer was actualy deleted by the user
+            # and not by the undo-redo system for example
+
+            # Save changes
+            threading.Thread(target=self.save_image_data).start()
+
+            self.on_layer_change(self.get_selected_layer())
+
+
+    def get_selected_layer(self):
+        layer_row = self.ui["layers_list"].get_selected_row()
+
+        for layer in self.layers:
+            if (layer.selector_row == layer_row):
+                return layer
 
     def layer_exists(self, layer_name):
         for layer in self.layers:
@@ -708,3 +824,26 @@ class PF2(Activity.Activity):
     def select_layer(self, layer):
         self.ui["layers_list"].select_row(layer.selector_row)
         self.layer_ui_activated(self.ui["layers_list"], layer.selector_row)
+
+    def delete_all_editable_layers(self):
+        count = len(self.layers) -1
+        while(len(self.layers) != 1):
+            self.select_layer(self.layers[1])
+            self.remove_layer_button_clicked(None)
+
+
+    def draw_ui_brush_circle(self, widget, context):
+        drawing = self.ui["edit_layer_mask_button"].get_active()
+        if(drawing):
+            size = self.ui["mask_brush_size"].get_value()
+            context.set_source_rgb(255, 255, 255)
+            context.arc(self.mousex, self.mousey, size/2.0, 0.0, 2 * numpy.pi);
+            context.stroke()
+
+    def mouse_coords_changed(self, widget, event):
+        self.mousex, self.mousey = event.x, event.y
+        print(event.x, event.y)
+        widget.queue_draw()
+
+    def brush_size_changed(self, sender):
+        self.ui["scroll_window"].queue_draw()

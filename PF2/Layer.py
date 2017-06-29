@@ -1,15 +1,18 @@
 from gi.repository import Gtk, GLib
+import PF2.VectorMask as VectorMask
+import cv2
 
 class Layer:
     def __init__(self, base, name, on_change):
         print("init", name)
-        self.mask = []
+        self.mask = VectorMask.VectorMask()
         self.tools = []
         self.tool_map = {}
         self.name = name
         self.enabled = True
         self.selected_tool = 0
         self.editable = not base
+        self.opacity = 1.0
 
         self.selector_row = None
 
@@ -63,8 +66,9 @@ class Layer:
 
         layerDict["tools"] = toolDict
         layerDict["name"] = self.name
-        layerDict["mask"] = self.mask
+        layerDict["mask"] = self.mask.get_vector_mask_dict()
         layerDict["enabled"] = self.enabled
+        layerDict["opacity"] = self.opacity
 
         return layerDict
 
@@ -78,7 +82,7 @@ class Layer:
         # The base layer only has tools.
         if(self.editable):
             # Load Mask Vectors
-            self.mask = dict["mask"]
+            self.mask.set_from_vector_mask_dict(dict["mask"])
 
             # Load Layer Name
             self.name = dict["name"]
@@ -86,14 +90,18 @@ class Layer:
             # Load Enabled State
             self.enabled = dict["enabled"]
 
+            # Load Opacity Fraction
+            self.opacity = dict["opacity"]
+
 
     def render_layer(self, baseImage, image, callback=None):
-        # We are passed a base image (original)
-        # Make a copy of this to pass through the tools
-        layer = baseImage.copy()
+        # Only process if the layer is enabled
+        if(self.enabled and self.opacity != 0.0):
+            # We are passed a base image (original)
+            # Make a copy of this to pass through the tools
+            layer = baseImage.copy()
 
-        # Base layer needs no mask processing
-        if(not self.editable):
+            # Process the Layer
             ntools = len(self.tools)
             count = 1
             for tool in self.tools:
@@ -105,11 +113,24 @@ class Layer:
                 layer = tool.on_update(layer)
                 count += 1
 
-            image = layer
 
-        ## Here we would blend with the mask
+            # Base layer needs no mask processing
+            if(not self.editable):
+                image = layer
+
+            # Here we would blend with the mask
+            else:
+                mask_map = self.mask.get_mask_map()
+                height, width = layer.shape[:2]
+                mask_map = cv2.resize(mask_map, (width, height), interpolation=cv2.INTER_AREA)
+                mask_map = mask_map * self.opacity
+
+                inverted_map = (mask_map * -1) + 1
+                for i in range(0,3):
+                    image[0:, 0:, i] = (layer[0:, 0:, i] * mask_map) + (image[0:, 0:, i] * inverted_map)
 
         return image
+
 
 
     def show_all(self):
@@ -126,3 +147,14 @@ class Layer:
         for tool in self.tools:
             tool.reset()
 
+
+    def set_size(self, width, height):
+        self.mask.set_dimentions(width, height)
+
+    def set_opacity(self, opacity):
+        self.opacity = opacity
+        self.on_tool_change(None, None)
+
+    def set_enabled(self, enabled):
+        self.enabled = enabled
+        self.on_tool_change(None, None)
