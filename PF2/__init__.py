@@ -9,13 +9,14 @@ import numpy
 import getpass
 import os
 
-from PF2 import Histogram
+from PF2 import Histogram, Layer
 from PF2.Tools import BlackWhite
 from PF2.Tools import Colours
 from PF2.Tools import Contrast
 from PF2.Tools import Details
 from PF2.Tools import Tonemap
 from PF2.Tools import HueEqualiser
+from PF2.Tools import Blur
 
 
 class PF2(Activity.Activity):
@@ -37,6 +38,7 @@ class PF2(Activity.Activity):
         # Get all UI Components
         self.ui = {}
         components = [
+            "main",
             "control_reveal",
             "histogram_reveal",
             "layers_reveal",
@@ -45,10 +47,11 @@ class PF2(Activity.Activity):
             "histogram",
             "layer_stack",
             "preview",
+            "preview_eventbox",
             "scroll_window",
             "open_button",
             "original_toggle",
-            "tools",
+            "tool_box_stack",
             "tool_stack",
             "open_window",
             "open_header",
@@ -63,7 +66,22 @@ class PF2(Activity.Activity):
             "zoom_toggle",
             "zoom_reveal",
             "zoom",
-            "reset"
+            "reset",
+            "mask_draw_toggle",
+            "mask_erase_toggle",
+            "mask_brush_size",
+            "layers_list",
+            "new_layer",
+            "layer_mask_reveal",
+            "add_layer_button",
+            "remove_layer_button",
+            "mask_brush_feather",
+            "mask_brush_feather_scale",
+            "edit_layer_mask_button",
+            "layer_opacity",
+            "layer_opacity_scale",
+            "layer_blend_mode",
+            "viewport"
         ]
 
         for component in components:
@@ -73,26 +91,23 @@ class PF2(Activity.Activity):
 
         # Set up tools
         self.tools = [
-            Contrast.Contrast(),
-            Tonemap.Tonemap(),
-            Details.Details(),
-            Colours.Colours(),
-            HueEqualiser.HueEqualiser(),
-            BlackWhite.BlackWhite(),
+            Contrast.Contrast,
+            Tonemap.Tonemap,
+            Details.Details,
+            Colours.Colours,
+            HueEqualiser.HueEqualiser,
+            BlackWhite.BlackWhite,
+            Blur.Blur
         ]
 
-        self.tool_map = {}
 
-        for tool in self.tools:
-            self.ui["tools"].add(tool.tool_button)
-            self.ui["tool_stack"].add(tool.widget)
-            self.tool_map[tool.tool_button] = tool
-            tool.tool_button.connect("clicked", self.on_tool_button_clicked)
-            tool.connect_on_change(self.on_tool_change)
+        # Setup layers
+        self.layers = []
+        self.base_layer = self.create_layer("base", True)
 
         # Set the first tool to active
-        self.tools[0].tool_button.set_active(True)
-        self.ui["tools"].show_all()
+        # self.tools[0].tool_button.set_active(True)
+        # self.ui["tools"].show_all()
 
         # Disable ui components by default
         self.ui["original_toggle"].set_sensitive(False)
@@ -104,6 +119,7 @@ class PF2(Activity.Activity):
         self.image_path = ""
         self.bit_depth = 8
         self.image = None
+        self.image_is_dirty = True
         self.original_image = None
         self.pwidth = 0
         self.pheight = 0
@@ -121,6 +137,12 @@ class PF2(Activity.Activity):
         self.undo_stack = []
         self.undo_position = 0
         self.undoing = False
+        self.current_layer_path = None
+        self.mousex = 0
+        self.mousey = 0
+        self.mousedown = False
+        self.layer_order = []
+        self.pre_undo_layer_name = "base"
 
         # Setup Open Dialog
         self.ui["open_window"].set_transient_for(self.root)
@@ -141,17 +163,21 @@ class PF2(Activity.Activity):
         self.ui["undo"].connect("clicked", self.on_undo)
         self.ui["redo"].connect("clicked", self.on_redo)
         self.ui["reset"].connect("clicked", self.on_reset)
+        self.ui["preview_eventbox"].connect('motion-notify-event', self.preview_dragged)
+        self.ui["preview_eventbox"].connect('button-press-event', self.new_path)
+        self.ui["mask_draw_toggle"].connect("toggled", self.mask_draw_toggled)
+        self.ui["mask_erase_toggle"].connect("toggled", self.mask_erase_toggled)
+        self.ui["new_layer"].connect("clicked", self.new_layer_button_clicked)
+        self.ui["layers_list"].connect("row-activated", self.layer_ui_activated)
+        self.ui["add_layer_button"].connect("clicked", self.new_layer_button_clicked)
+        self.ui["remove_layer_button"].connect("clicked", self.remove_layer_button_clicked)
+        self.ui["edit_layer_mask_button"].connect("toggled", self.edit_mask_toggled)
+        self.ui["layer_opacity"].connect("value-changed", self.update_layer_opacity)
+        self.ui["scroll_window"].connect_after("draw", self.draw_ui_brush_circle)
+        self.ui["scroll_window"].connect_after('motion-notify-event', self.mouse_coords_changed)
+        self.ui["mask_brush_size"].connect("value-changed", self.brush_size_changed)
+        self.ui["layer_blend_mode"].connect("changed", self.layer_blend_mode_changed)
 
-
-    def on_tool_button_clicked(self, sender):
-        if(sender.get_active()):
-            self.ui["tool_stack"].set_visible_child(self.tool_map[sender].widget)
-            for key in self.tool_map:
-                if(key != sender):
-                    key.set_active(False)
-
-        elif(self.ui["tool_stack"].get_visible_child() == self.tool_map[sender].widget):
-            sender.set_active(True)
 
 
     def on_open_clicked(self, sender):
@@ -169,6 +195,8 @@ class PF2(Activity.Activity):
         self.ui["original_toggle"].set_sensitive(True)
         self.ui["export_image"].set_sensitive(True)
         self.ui["reset"].set_sensitive(True)
+        self.ui["new_layer"].set_sensitive(True)
+        self.ui["layers_reveal"].set_reveal_child(False)
         self.is_editing = True
         if(path == None):
             self.image_path = self.ui["open_chooser"].get_filename()
@@ -180,6 +208,15 @@ class PF2(Activity.Activity):
 
         self.show_message("Loading Photo…", "Please wait while PhotoFiddle loads your photo", True)
         self.root.get_titlebar().set_subtitle("%s…" % (self.image_path))
+
+        # Delete all layers, except the base
+        for layer in self.layers:
+            if(layer.name != "base"):
+                self.ui["layers_list"].remove(layer.selector_row)
+
+        self.layers = [self.base_layer,]
+
+        self.select_layer(self.base_layer)
 
         thread = threading.Thread(target=self.open_image,
                                   args=(w, h))
@@ -265,7 +302,7 @@ class PF2(Activity.Activity):
             self.ui["original_toggle"].set_active(False)
 
 
-    def on_tool_change(self, tool, property):
+    def on_layer_change(self, layer):
         if(self.has_loaded):
             if(not self.change_occurred):
                 self.change_occurred = True
@@ -319,18 +356,20 @@ class PF2(Activity.Activity):
         self.ui["redo"].set_sensitive(len(self.undo_stack)-1 > self.undo_position)
 
     def on_undo(self, sender):
+        self.pre_undo_layer_name = self.get_selected_layer().name
         self.undo_position -= 1
         self.update_undo_state()
         self.update_from_undo_stack(self.undo_stack[self.undo_position])
 
     def on_redo(self, sender):
+        self.pre_undo_layer_name = self.get_selected_layer().name
         self.undo_position += 1
         self.update_undo_state()
         self.update_from_undo_stack(self.undo_stack[self.undo_position])
 
     def on_reset(self, sender):
-        for tool in self.tools:
-            tool.reset()
+        for layer in self.layers:
+            layer.reset_tools()
 
 
 
@@ -388,6 +427,8 @@ class PF2(Activity.Activity):
         # Resize OPENCV Copy
         self.original_image = cv2.resize(self.original_image, (int(nw), int(nh)), interpolation = cv2.INTER_AREA)
 
+        self.image_is_dirty = True
+
         self.image = numpy.copy(self.original_image)
 
         # Update image
@@ -402,8 +443,9 @@ class PF2(Activity.Activity):
             time.sleep(0.5)
         self.additional_change_occurred = False
         GLib.idle_add(self.start_work)
-        self.image = numpy.copy(self.original_image)
-        self.image = self.run_stack(self.image)
+        image = numpy.copy(self.original_image)
+        self.image = self.run_stack(image)
+        self.image_is_dirty = False
         if(self.additional_change_occurred):
             self.update_image()
         else:
@@ -420,14 +462,13 @@ class PF2(Activity.Activity):
     def run_stack(self, image, callback=None):
         if(not self.running_stack):
             self.running_stack = True
-            ntools = len(self.tools)
-            count = 1
-            for tool in self.tools:
-                if(callback != None):
-                    # For showing progress
-                    callback(tool.name, ntools, count-1)
-                image = tool.on_update(image)
-                count += 1
+
+            baseImage = image.copy()
+
+            for layer in self.layers:
+                print(layer)
+                image = layer.render_layer(baseImage, image, callback)
+
             self.running_stack = False
             return image
 
@@ -478,26 +519,26 @@ class PF2(Activity.Activity):
         print(path)
         f = open(path, "w")
 
-        toolDict = {}
-        for tool in self.tools:
-            toolDict[tool.id] = tool.get_properties_as_dict()
+        layerDict = {}
+        layerOrder = []
+        for layer in self.layers:
+            layerDict[layer.name] = layer.get_layer_dict()
+            layerOrder.append(layer.name)
 
         if(not self.undoing) and (self.has_loaded):
             if(len(self.undo_stack)-1 != self.undo_position):
                 self.undo_stack = self.undo_stack[:self.undo_position+1]
-            if(self.undo_stack[self.undo_position] != toolDict):
-                self.undo_stack += [toolDict,]
+            if(self.undo_stack[self.undo_position] != {"layers": layerDict, "layer-order": layerOrder}):
+                self.undo_stack += [{"layers": layerDict, "layer-order": layerOrder},]
                 self.undo_position = len(self.undo_stack)-1
                 GLib.idle_add(self.update_undo_state)
+
 
         data = {
             "path":self.image_path,
             "format-revision":1,
-            "layers": {
-                "base":{
-                    "tools": toolDict
-                }
-            }
+            "layers": layerDict,
+            "layer-order": layerOrder
         }
 
         f.write(str(data))
@@ -512,11 +553,13 @@ class PF2(Activity.Activity):
             try:
                 data = ast.literal_eval(sdata)
                 if(data["format-revision"] == 1):
-                    for tool in self.tools:
-                        if(tool.id in data["layers"]["base"]["tools"]):
-                            GLib.idle_add(tool.load_properties,data["layers"]["base"]["tools"][tool.id])
+                    if("layer-order" not in data):
+                        # Backwards compatability
+                        data["layer-order"] = ["base",]
+                    for layer_name in data["layer-order"]:
+                        GLib.idle_add(self.create_layer_with_data, layer_name, data["layers"][layer_name])
 
-                    self.undo_stack = [data["layers"]["base"]["tools"],]
+                    self.undo_stack = [data,]
                     self.undo_position = 0
                     loadDefaults = False
             except:
@@ -524,14 +567,18 @@ class PF2(Activity.Activity):
                                                 "The edit file for this photo is corrupted and could not be loaded.")
 
         if(loadDefaults):
-            for tool in self.tools:
-                GLib.idle_add(tool.reset)
+            for layer in self.layers:
+                for tool in layer.tools:
+                    GLib.idle_add(tool.reset)
 
-            toolDict = {}
-            for tool in self.tools:
-                toolDict[tool.id] = tool.get_properties_as_dict()
+            layerDict = {}
+            layerOrder = []
+            for layer in self.layers:
+                layerDict[layer.name] = layer.get_layer_dict()
+                layerOrder.append(layer.name)
 
-            self.undo_stack = [toolDict, ]
+
+            self.undo_stack = [{"layers": layerDict, "layer-order": layerOrder}, ]
             self.undo_position = 0
 
         GLib.idle_add(self.update_undo_state)
@@ -539,11 +586,26 @@ class PF2(Activity.Activity):
         self.undoing = False
 
 
+    def create_layer_with_data(self, layer, data):
+        if (layer == "base"):
+            self.base_layer.set_from_layer_dict(data)
+        else:
+            GLib.idle_add(self.show_layers)
+            ilayer = self.create_layer(layer, False)
+            ilayer.set_from_layer_dict(data)
+
+
     def update_from_undo_stack(self, data):
         self.undoing = True
-        for tool in self.tools:
-            if (tool.id in data):
-                tool.load_properties(data[tool.id])
+        self.delete_all_editable_layers()
+        for layer_name in data["layer-order"]:
+            if (layer_name == "base"):
+                self.base_layer.set_from_layer_dict(data["layers"][layer_name])
+            else:
+                ilayer = self.create_layer(layer_name, False, layer_name == self.pre_undo_layer_name)
+                ilayer.set_from_layer_dict(data["layers"][layer_name])
+                self.show_layers()
+
 
     def get_export_image(self, w, h):
         GLib.idle_add(self.on_export_started)
@@ -561,7 +623,257 @@ class PF2(Activity.Activity):
 
 
 
+    ## Layers Stuff ##
+
+    def preview_dragged(self, widget, event):
+
+        x, y = widget.translate_coordinates(self.ui["preview"], event.x, event.y)
+
+        draw = self.ui["mask_draw_toggle"].get_active()
+        erase = self.ui["mask_erase_toggle"].get_active()
+        layer = self.get_selected_layer()
+        if((draw or erase) and layer.editable and self.current_layer_path):
+
+            if (x < 0.0):
+                x = 0
+            if (y < 0.0):
+                y = 0
+
+            pwidth = self.pimage.get_width()
+            pheight = self.pimage.get_height()
+
+            if (x > pwidth):
+                x = pwidth
+            if (y > pheight):
+                y = pheight
+
+            print(x, y)
+
+            if(not self.image_is_dirty):
+                fill = (0, 0, 255)
+                if(erase):
+                    fill = (255, 0, 0)
+
+                preview = self.current_layer_path.add_point(int(x), int(y), (pheight, pwidth, 3), fill)
+
+                # Bits per pixel
+                bpp = float(str(self.image.dtype).replace("uint", "").replace("float", ""))
+                # Pixel value range
+                np = float(2 ** bpp - 1)
+
+                self.image[preview == 255] = np
+                cv2.imwrite("/tmp/phf2-preview-%s-drag.png" % getpass.getuser(), self.image)
+                temppbuf = GdkPixbuf.Pixbuf.new_from_file("/tmp/phf2-preview-%s-drag.png" % getpass.getuser())
+                self.ui["preview"].set_from_pixbuf(temppbuf)
+
+            self.on_layer_change(layer)
+
+            self.mouse_down_coords_changed(widget, event)
+            return True
+
+    def new_path(self, widget, event):
+        draw = self.ui["mask_draw_toggle"].get_active()
+        erase = self.ui["mask_erase_toggle"].get_active()
+        layer = self.get_selected_layer()
+        if((draw or erase) and layer.editable):
+            print(self.pimage.get_width(), self.pimage.get_height())
+            width = self.pimage.get_width()
+            size = self.ui["mask_brush_size"].get_value()
+            feather = self.ui["mask_brush_feather"].get_value()
+            self.current_layer_path = layer.mask.get_new_path(size, feather, float(self.awidth)/float(width), draw)
 
 
+    def mask_draw_toggled(self, widget):
+        self.ui["mask_erase_toggle"].set_active(not widget.get_active())
+
+    def mask_erase_toggled(self, widget):
+        self.ui["mask_draw_toggle"].set_active(not widget.get_active())
+        self.ui["mask_brush_feather_scale"].set_sensitive(not widget.get_active())
 
 
+    def edit_mask_toggled(self, widget):
+        self.ui["layer_mask_reveal"].set_reveal_child(widget.get_active())
+        self.ui["mask_draw_toggle"].set_active(widget.get_active())
+        self.ui["mask_erase_toggle"].set_active(False)
+        self.ui["scroll_window"].queue_draw()
+
+    def update_layer_opacity(self, sender):
+        layer = self.get_selected_layer()
+        layer.set_opacity(sender.get_value())
+
+
+    def create_layer(self, layer_name, is_base, select = False):
+        layer = Layer.Layer(is_base, layer_name, self.on_layer_change)
+        for tool in self.tools:
+            tool_instance = tool()
+            layer.add_tool(tool_instance)
+
+        self.layers += [layer,]
+
+        GLib.idle_add(self.create_layer_ui, layer, select)
+
+        return layer
+
+    def create_layer_ui(self, layer, select):
+        layer_box = Gtk.HBox()
+        layer_box.set_hexpand(False)
+        layer_box.set_halign(Gtk.Align.START)
+
+        layer_toggle = Gtk.CheckButton()
+        layer_toggle.set_sensitive(layer.editable)
+        layer_toggle.set_active(layer.enabled)
+        layer_toggle.set_hexpand(False)
+        layer_toggle.set_halign(Gtk.Align.START)
+        layer_toggle.set_margin_right(8)
+        layer_toggle.set_margin_left(8)
+        layer_toggle.set_margin_top(4)
+        layer_toggle.set_margin_bottom(4)
+        layer_toggle.connect("toggled", self.toggle_layer, layer)
+
+        layer_label = Gtk.Label()
+        layer_label.set_label(layer.name)
+        if(layer.name == "base"):
+            layer_label.set_label("Base Layer")
+        layer_label.set_hexpand(True)
+        layer_label.set_halign(Gtk.Align.FILL)
+        layer_label.set_margin_top(4)
+        layer_label.set_margin_bottom(4)
+
+        layer_box.add(layer_toggle)
+        layer_box.add(layer_label)
+
+        layer.show_all()
+        layer_box.show_all()
+
+        self.ui["layers_list"].add(layer_box)
+
+        layer.selector_row = layer_box.get_parent()
+
+        self.ui["tool_box_stack"].add(layer.tool_box)
+        self.ui["tool_stack"].add(layer.tool_stack)
+
+        if(select):
+            self.select_layer(layer)
+
+
+    def layer_ui_activated(self, widget, row):
+        layer_index = row.get_index()
+        self.ui["tool_stack"].set_visible_child(self.layers[layer_index].tool_stack)
+        self.ui["tool_box_stack"].set_visible_child(self.layers[layer_index].tool_box)
+        self.ui["remove_layer_button"].set_sensitive(self.layers[layer_index].editable)
+        self.ui["edit_layer_mask_button"].set_sensitive(self.layers[layer_index].editable)
+        self.ui["layer_opacity_scale"].set_sensitive(self.layers[layer_index].editable)
+        self.ui["layer_blend_mode"].set_sensitive(self.layers[layer_index].editable)
+        self.ui["layer_blend_mode"].set_active(["additive", "overlay"].index(self.layers[layer_index].blend_mode))
+        self.ui["layer_opacity"].set_value(self.layers[layer_index].opacity)
+        if(self.ui["edit_layer_mask_button"].get_active()):
+            self.ui["edit_layer_mask_button"].set_active(self.layers[layer_index].editable)
+
+    def toggle_layer(self, sender, layer):
+        layer.set_enabled(sender.get_active())
+
+
+    def new_layer_button_clicked(self, widget):
+        self.show_layers()
+        # Allocate an un-used layer name
+        layer_number = len(self.layers)
+        layer_name = "Layer %i" % layer_number
+
+        while(self.layer_exists(layer_name)):
+            layer_number += 1
+            layer_name = "Layer %i" % layer_number
+
+        # Create the layer
+        layer = self.create_layer(layer_name, False)
+        layer.set_size(self.awidth, self.aheight)
+
+        # Save changes
+        threading.Thread(target=self.save_image_data).start()
+        self.on_layer_change(layer)
+
+
+    def remove_layer_button_clicked(self, widget):
+        layer_row = self.ui["layers_list"].get_selected_row()
+
+        selected_index = 1
+
+        new_layers = []
+        for layer in self.layers:
+            if(layer.selector_row != layer_row):
+                new_layers += [layer]
+            else:
+                selected_index = self.layers.index(layer)
+
+        self.ui["layers_list"].remove(layer_row)
+        self.layers = new_layers
+
+        # Select next layer
+        self.select_layer(self.layers[selected_index -1])
+
+        if (len(self.layers) == 1):
+            self.ui["layers_reveal"].set_reveal_child(False)
+
+        if(widget != None):
+            # Only do this if the layer was actualy deleted by the user
+            # and not by the undo-redo system for example
+
+            # Save changes
+            threading.Thread(target=self.save_image_data).start()
+
+            self.on_layer_change(self.get_selected_layer())
+
+
+    def get_selected_layer(self):
+        layer_row = self.ui["layers_list"].get_selected_row()
+
+        for layer in self.layers:
+            if (layer.selector_row == layer_row):
+                return layer
+
+    def layer_exists(self, layer_name):
+        for layer in self.layers:
+            if(layer.name == layer_name):
+                return True
+        return False
+
+    def show_layers(self):
+        self.ui["layers_reveal"].set_reveal_child(True)
+
+    def select_layer(self, layer):
+        self.ui["layers_list"].select_row(layer.selector_row)
+        self.layer_ui_activated(self.ui["layers_list"], layer.selector_row)
+
+    def delete_all_editable_layers(self):
+        count = len(self.layers) -1
+        while(len(self.layers) != 1):
+            self.select_layer(self.layers[1])
+            self.remove_layer_button_clicked(None)
+
+
+    def draw_ui_brush_circle(self, widget, context):
+        drawing = self.ui["edit_layer_mask_button"].get_active()
+        if(drawing):
+            size = self.ui["mask_brush_size"].get_value()
+            if(self.mousedown):
+                context.set_source_rgb(255, 0, 0)
+            else:
+                context.set_source_rgb(255, 255, 255)
+            context.arc(self.mousex, self.mousey, size/2.0, 0.0, 2 * numpy.pi);
+            context.stroke()
+
+    def mouse_coords_changed(self, widget, event):
+        self.mousedown = False
+        self.mousex, self.mousey = event.x, event.y
+        widget.queue_draw()
+
+    def mouse_down_coords_changed(self, widget, event):
+        self.mousedown = True
+        self.mousex, self.mousey = widget.translate_coordinates(self.ui["scroll_window"], event.x, event.y)
+        widget.queue_draw()
+
+    def brush_size_changed(self, sender):
+        self.ui["scroll_window"].queue_draw()
+
+    def layer_blend_mode_changed(self, sender):
+        layer = self.get_selected_layer()
+        layer.set_blending_mode(sender.get_active_text().lower())
