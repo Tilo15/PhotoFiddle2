@@ -16,6 +16,7 @@ from PF2.Tools import Contrast
 from PF2.Tools import Details
 from PF2.Tools import Tonemap
 from PF2.Tools import HueEqualiser
+from PF2.Tools import Blur
 
 
 class PF2(Activity.Activity):
@@ -78,7 +79,9 @@ class PF2(Activity.Activity):
             "mask_brush_feather_scale",
             "edit_layer_mask_button",
             "layer_opacity",
-            "layer_opacity_scale"
+            "layer_opacity_scale",
+            "layer_blend_mode",
+            "viewport"
         ]
 
         for component in components:
@@ -93,7 +96,8 @@ class PF2(Activity.Activity):
             Details.Details,
             Colours.Colours,
             HueEqualiser.HueEqualiser,
-            BlackWhite.BlackWhite
+            BlackWhite.BlackWhite,
+            Blur.Blur
         ]
 
 
@@ -136,7 +140,9 @@ class PF2(Activity.Activity):
         self.current_layer_path = None
         self.mousex = 0
         self.mousey = 0
+        self.mousedown = False
         self.layer_order = []
+        self.pre_undo_layer_name = "base"
 
         # Setup Open Dialog
         self.ui["open_window"].set_transient_for(self.root)
@@ -168,8 +174,9 @@ class PF2(Activity.Activity):
         self.ui["edit_layer_mask_button"].connect("toggled", self.edit_mask_toggled)
         self.ui["layer_opacity"].connect("value-changed", self.update_layer_opacity)
         self.ui["scroll_window"].connect_after("draw", self.draw_ui_brush_circle)
-        self.ui["scroll_window"].connect('motion-notify-event', self.mouse_coords_changed)
+        self.ui["scroll_window"].connect_after('motion-notify-event', self.mouse_coords_changed)
         self.ui["mask_brush_size"].connect("value-changed", self.brush_size_changed)
+        self.ui["layer_blend_mode"].connect("changed", self.layer_blend_mode_changed)
 
 
 
@@ -349,11 +356,13 @@ class PF2(Activity.Activity):
         self.ui["redo"].set_sensitive(len(self.undo_stack)-1 > self.undo_position)
 
     def on_undo(self, sender):
+        self.pre_undo_layer_name = self.get_selected_layer().name
         self.undo_position -= 1
         self.update_undo_state()
         self.update_from_undo_stack(self.undo_stack[self.undo_position])
 
     def on_redo(self, sender):
+        self.pre_undo_layer_name = self.get_selected_layer().name
         self.undo_position += 1
         self.update_undo_state()
         self.update_from_undo_stack(self.undo_stack[self.undo_position])
@@ -434,9 +443,8 @@ class PF2(Activity.Activity):
             time.sleep(0.5)
         self.additional_change_occurred = False
         GLib.idle_add(self.start_work)
-        self.image_is_dirty = True
-        self.image = numpy.copy(self.original_image)
-        self.image = self.run_stack(self.image)
+        image = numpy.copy(self.original_image)
+        self.image = self.run_stack(image)
         self.image_is_dirty = False
         if(self.additional_change_occurred):
             self.update_image()
@@ -520,8 +528,8 @@ class PF2(Activity.Activity):
         if(not self.undoing) and (self.has_loaded):
             if(len(self.undo_stack)-1 != self.undo_position):
                 self.undo_stack = self.undo_stack[:self.undo_position+1]
-            if(self.undo_stack[self.undo_position] != layerDict):
-                self.undo_stack += [layerDict,]
+            if(self.undo_stack[self.undo_position] != {"layers": layerDict, "layer-order": layerOrder}):
+                self.undo_stack += [{"layers": layerDict, "layer-order": layerOrder},]
                 self.undo_position = len(self.undo_stack)-1
                 GLib.idle_add(self.update_undo_state)
 
@@ -594,7 +602,7 @@ class PF2(Activity.Activity):
             if (layer_name == "base"):
                 self.base_layer.set_from_layer_dict(data["layers"][layer_name])
             else:
-                ilayer = self.create_layer(layer_name, False)
+                ilayer = self.create_layer(layer_name, False, layer_name == self.pre_undo_layer_name)
                 ilayer.set_from_layer_dict(data["layers"][layer_name])
                 self.show_layers()
 
@@ -660,6 +668,9 @@ class PF2(Activity.Activity):
 
             self.on_layer_change(layer)
 
+            self.mouse_down_coords_changed(widget, event)
+            return True
+
     def new_path(self, widget, event):
         draw = self.ui["mask_draw_toggle"].get_active()
         erase = self.ui["mask_erase_toggle"].get_active()
@@ -691,7 +702,7 @@ class PF2(Activity.Activity):
         layer.set_opacity(sender.get_value())
 
 
-    def create_layer(self, layer_name, is_base):
+    def create_layer(self, layer_name, is_base, select = False):
         layer = Layer.Layer(is_base, layer_name, self.on_layer_change)
         for tool in self.tools:
             tool_instance = tool()
@@ -699,11 +710,11 @@ class PF2(Activity.Activity):
 
         self.layers += [layer,]
 
-        GLib.idle_add(self.create_layer_ui, layer)
+        GLib.idle_add(self.create_layer_ui, layer, select)
 
         return layer
 
-    def create_layer_ui(self, layer):
+    def create_layer_ui(self, layer, select):
         layer_box = Gtk.HBox()
         layer_box.set_hexpand(False)
         layer_box.set_halign(Gtk.Align.START)
@@ -721,6 +732,8 @@ class PF2(Activity.Activity):
 
         layer_label = Gtk.Label()
         layer_label.set_label(layer.name)
+        if(layer.name == "base"):
+            layer_label.set_label("Base Layer")
         layer_label.set_hexpand(True)
         layer_label.set_halign(Gtk.Align.FILL)
         layer_label.set_margin_top(4)
@@ -739,6 +752,9 @@ class PF2(Activity.Activity):
         self.ui["tool_box_stack"].add(layer.tool_box)
         self.ui["tool_stack"].add(layer.tool_stack)
 
+        if(select):
+            self.select_layer(layer)
+
 
     def layer_ui_activated(self, widget, row):
         layer_index = row.get_index()
@@ -747,6 +763,8 @@ class PF2(Activity.Activity):
         self.ui["remove_layer_button"].set_sensitive(self.layers[layer_index].editable)
         self.ui["edit_layer_mask_button"].set_sensitive(self.layers[layer_index].editable)
         self.ui["layer_opacity_scale"].set_sensitive(self.layers[layer_index].editable)
+        self.ui["layer_blend_mode"].set_sensitive(self.layers[layer_index].editable)
+        self.ui["layer_blend_mode"].set_active(["additive", "overlay"].index(self.layers[layer_index].blend_mode))
         self.ui["layer_opacity"].set_value(self.layers[layer_index].opacity)
         if(self.ui["edit_layer_mask_button"].get_active()):
             self.ui["edit_layer_mask_button"].set_active(self.layers[layer_index].editable)
@@ -836,14 +854,26 @@ class PF2(Activity.Activity):
         drawing = self.ui["edit_layer_mask_button"].get_active()
         if(drawing):
             size = self.ui["mask_brush_size"].get_value()
-            context.set_source_rgb(255, 255, 255)
+            if(self.mousedown):
+                context.set_source_rgb(255, 0, 0)
+            else:
+                context.set_source_rgb(255, 255, 255)
             context.arc(self.mousex, self.mousey, size/2.0, 0.0, 2 * numpy.pi);
             context.stroke()
 
     def mouse_coords_changed(self, widget, event):
+        self.mousedown = False
         self.mousex, self.mousey = event.x, event.y
-        print(event.x, event.y)
+        widget.queue_draw()
+
+    def mouse_down_coords_changed(self, widget, event):
+        self.mousedown = True
+        self.mousex, self.mousey = widget.translate_coordinates(self.ui["scroll_window"], event.x, event.y)
         widget.queue_draw()
 
     def brush_size_changed(self, sender):
         self.ui["scroll_window"].queue_draw()
+
+    def layer_blend_mode_changed(self, sender):
+        layer = self.get_selected_layer()
+        layer.set_blending_mode(sender.get_active_text().lower())

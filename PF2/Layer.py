@@ -13,10 +13,14 @@ class Layer:
         self.selected_tool = 0
         self.editable = not base
         self.opacity = 1.0
+        self.blend_mode = "additive"
+        if(not self.editable):
+            self.blend_mode = "overlay"
 
         self.selector_row = None
 
         self.tool_box = Gtk.FlowBox()
+        self.tool_box.set_selection_mode(Gtk.SelectionMode.NONE)
         self.tool_box.set_orientation(1)
 
         self.tool_stack = Gtk.Stack()
@@ -69,6 +73,7 @@ class Layer:
         layerDict["mask"] = self.mask.get_vector_mask_dict()
         layerDict["enabled"] = self.enabled
         layerDict["opacity"] = self.opacity
+        layerDict["blend-mode"] = self.blend_mode
 
         return layerDict
 
@@ -93,13 +98,22 @@ class Layer:
             # Load Opacity Fraction
             self.opacity = dict["opacity"]
 
+            # Load Blend Mode
+            self.blend_mode = dict["blend-mode"]
+
 
     def render_layer(self, baseImage, image, callback=None):
         # Only process if the layer is enabled
         if(self.enabled and self.opacity != 0.0):
-            # We are passed a base image (original)
-            # Make a copy of this to pass through the tools
-            layer = baseImage.copy()
+            layer = None
+
+            if(self.blend_mode == "overlay"):
+                # We are passed a base image (original)
+                # Make a copy of this to pass through the tools
+                layer = baseImage.copy()
+            else: # if(self.blend_mode == "additive"):
+                # Layer is additive, make copy of current working image
+                layer = image.copy()
 
             # Process the Layer
             ntools = len(self.tools)
@@ -157,4 +171,8 @@ class Layer:
 
     def set_enabled(self, enabled):
         self.enabled = enabled
+        self.on_tool_change(None, None)
+
+    def set_blending_mode(self, mode):
+        self.blend_mode = mode
         self.on_tool_change(None, None)
