@@ -143,6 +143,14 @@ class PF2(Activity.Activity):
         self.mousedown = False
         self.layer_order = []
         self.pre_undo_layer_name = "base"
+        self.pre_undo_editing = False
+        self.pre_undo_erasing = False
+        self.last_selected_layer = None
+        self.was_editing_mask = False
+        self.source_image = None
+        self.is_scaling = False
+        self.current_processing_layer_name = "base"
+        self.current_processing_layer_index = 0
 
         # Setup Open Dialog
         self.ui["open_window"].set_transient_for(self.root)
@@ -303,13 +311,31 @@ class PF2(Activity.Activity):
 
 
     def on_layer_change(self, layer):
+        print(layer, "changed")
         if(self.has_loaded):
             if(not self.change_occurred):
                 self.change_occurred = True
-                thread = threading.Thread(target=self.update_image)
+                thread = threading.Thread(target=self.update_image, args=(False, layer))
                 thread.start()
             else:
                 self.additional_change_occurred = True
+
+    def on_layer_mask_change(self, layer):
+        if(self.has_loaded):
+            if(not self.change_occurred):
+                self.change_occurred = True
+                threading.Thread(target=self.__on_layer_mask_change).start()
+                self.save_image_data()
+
+    def __on_layer_mask_change(self):
+        image = self.get_selected_layer().layer_copy.copy()
+        image = self.get_selected_layer().get_layer_mask_preview(image)
+        self.image_is_dirty = True
+        self.image = image
+        self.update_preview()
+        self.change_occurred = False
+        self.image_is_dirty = False
+
 
     def on_lower_peak_toggled(self, sender):
         self.lower_peak_on = sender.get_active()
@@ -329,8 +355,8 @@ class PF2(Activity.Activity):
             thread = threading.Thread(target=self.update_image, args=(True,))
             thread.start()
 
-    def image_opened(self, depth):
-        self.root.get_titlebar().set_subtitle("%s (%s Bit)" % (self.image_path, depth))
+    def image_opened(self):
+        self.root.get_titlebar().set_subtitle("%s (%s Bit)" % (self.image_path, self.bit_depth))
         self.hide_message()
 
 
@@ -357,12 +383,16 @@ class PF2(Activity.Activity):
 
     def on_undo(self, sender):
         self.pre_undo_layer_name = self.get_selected_layer().name
+        self.pre_undo_erasing = self.ui["mask_erase_toggle"].get_active()
+        self.pre_undo_editing = self.ui["edit_layer_mask_button"].get_active()
         self.undo_position -= 1
         self.update_undo_state()
         self.update_from_undo_stack(self.undo_stack[self.undo_position])
 
     def on_redo(self, sender):
         self.pre_undo_layer_name = self.get_selected_layer().name
+        self.pre_undo_erasing = self.ui["mask_erase_toggle"].get_active()
+        self.pre_undo_editing = self.ui["edit_layer_mask_button"].get_active()
         self.undo_position += 1
         self.update_undo_state()
         self.update_from_undo_stack(self.undo_stack[self.undo_position])
@@ -375,82 +405,109 @@ class PF2(Activity.Activity):
 
     ## Background Tasks ##
     def open_image(self, w, h):
+
         self.load_image_data()
         try:
+            # Get Bit Depth
+            imdepth = cv2.imread(self.image_path, 2 | 1)
+            self.bit_depth = str(imdepth.dtype).replace("uint", "").replace("float", "")
+
+            # Read the 8Bit Preview
+            self.source_image = cv2.imread(self.image_path).astype(numpy.uint8)
+
+            # Load the image
             self.resize_preview(w, h)
         except:
             pass
         while(self.image == None):
             time.sleep(1)
-        GLib.idle_add(self.image_opened, str(self.image.dtype).replace("uint", "").replace("float", ""))
+        GLib.idle_add(self.image_opened)
         time.sleep(1)
         self.has_loaded = True
 
 
 
     def resize_preview(self, w, h):
-        # Inhibit undo stack to prevent
-        # Adding an action on resize
-        self.undoing = True
-
-        self.original_image = cv2.imread(self.image_path, 2 | 1)
-        height, width = self.original_image.shape[:2]
-
-        self.aheight = height
-        self.awidth = width
-
-        self.pheight = h
-        self.pwidth = w
-
-        # Get fitting size
-        ratio = float(w)/width
-        if(height*ratio > h):
-            ratio = float(h)/height
-
-        nw = width * ratio
-        nh = height * ratio
-
-        # Do quick ui resize
-        if(self.image != None) and (os.path.exists("/tmp/phf2-preview-%s.png" % getpass.getuser())):
-            # If we have an edited version, show that
-            self.pimage = GdkPixbuf.Pixbuf.new_from_file_at_scale("/tmp/phf2-preview-%s.png" % getpass.getuser(),
-                                                                         int(nw), int(nh), True)
-            GLib.idle_add(self.show_current)
-
-        self.poriginal = GdkPixbuf.Pixbuf.new_from_file_at_scale(self.image_path,
-                                                            int(nw), int(nh), True)
-        if(self.image == None):
-            # Otherwise show the original
-            GLib.idle_add(self.show_original)
+        if(self.source_image != None):
+            # Inhibit undo stack to prevent
+            # Adding an action on resize
+            self.undoing = True
 
 
-        # Resize OPENCV Copy
-        self.original_image = cv2.resize(self.original_image, (int(nw), int(nh)), interpolation = cv2.INTER_AREA)
 
-        self.image_is_dirty = True
+            self.original_image = self.source_image.copy()
 
-        self.image = numpy.copy(self.original_image)
+            height, width = self.original_image.shape[:2]
 
-        # Update image
-        if (not self.change_occurred):
-            self.change_occurred = True
-            self.update_image()
-        else:
-            self.additional_change_occurred = True
 
-    def update_image(self, immediate=False):
+            self.aheight = height
+            self.awidth = width
+
+            self.pheight = h
+            self.pwidth = w
+
+            # Get fitting size
+            ratio = float(w)/width
+            if(height*ratio > h):
+                ratio = float(h)/height
+
+            nw = width * ratio
+            nh = height * ratio
+
+
+            # Do quick ui resize
+            # if(self.image != None):
+            #     # If we have an edited version, show that
+            #     image = cv2.resize(self.image, (int(nw), int(nh)), interpolation=cv2.INTER_NEAREST)
+            #     self.pimage = self.pimage = self.create_pixbuf(image)
+            #     GLib.idle_add(self.show_current)
+
+            if(self.pimage != None and not self.is_scaling):
+                self.is_scaling = True
+                # If we have an edited version, show that
+                image = self.pimage.scale_simple(int(nw), int(nh), GdkPixbuf.InterpType.NEAREST)
+                self.pimage = image
+                GLib.idle_add(self.show_current)
+                self.is_scaling = False
+
+            self.poriginal = GdkPixbuf.Pixbuf.new_from_file_at_scale(self.image_path,
+                                                                int(nw), int(nh), True)
+            if(self.pimage == None):
+                # Otherwise show the original
+                GLib.idle_add(self.show_original)
+
+
+            # Resize OPENCV Copy
+            self.original_image = cv2.resize(self.original_image, (int(nw), int(nh)), interpolation = cv2.INTER_AREA)
+
+            self.image_is_dirty = True
+
+            self.image = self.original_image.copy()
+
+            # Update image
+            if (not self.change_occurred):
+                self.change_occurred = True
+                self.update_image()
+            else:
+                self.additional_change_occurred = True
+
+
+
+    def update_image(self, immediate=False, changed_layer=None):
         if(not immediate):
             time.sleep(0.5)
         self.additional_change_occurred = False
         GLib.idle_add(self.start_work)
         image = numpy.copy(self.original_image)
-        self.image = self.run_stack(image)
+        rst = time.time()
+        self.image = self.run_stack(image, changed_layer=changed_layer)
+        self.process_mask()
         self.image_is_dirty = False
         if(self.additional_change_occurred):
             self.update_image()
         else:
             self.save_image_data()
-            self.draw_hist(self.image)
+            threading.Thread(target=self.draw_hist, args=(self.image,)).start()
             self.process_peaks()
             self.update_preview()
             GLib.idle_add(self.stop_work)
@@ -459,15 +516,41 @@ class PF2(Activity.Activity):
 
 
 
-    def run_stack(self, image, callback=None):
+    def run_stack(self, image, callback=None, changed_layer=None):
         if(not self.running_stack):
             self.running_stack = True
 
             baseImage = image.copy()
 
-            for layer in self.layers:
-                print(layer)
-                image = layer.render_layer(baseImage, image, callback)
+            image = None
+
+            carry = True
+            if(baseImage.shape == self.image.shape) and (changed_layer != None) and (changed_layer in self.layers):
+                changed_layer_index = self.layers.index(changed_layer)
+                if(changed_layer_index > 0):
+                    carry = False
+                    layer_under = self.layers[changed_layer_index -1]
+                    image = layer_under.layer_copy.copy()
+                    for layer in self.layers[changed_layer_index: ]:
+                        self.current_processing_layer_name = layer.name
+                        self.current_processing_layer_index = self.layers.index(layer)
+                        if(self.additional_change_occurred):
+                            break
+                        print(layer)
+                        image = layer.render_layer(baseImage, image, callback)
+
+
+            if(carry):
+                for layer in self.layers:
+                    self.current_processing_layer_name = layer.name
+                    self.current_processing_layer_index = self.layers.index(layer)
+                    if (self.additional_change_occurred):
+                        break
+                    print(layer)
+                    image = layer.render_layer(baseImage, image, callback)
+
+
+
 
             self.running_stack = False
             return image
@@ -479,12 +562,27 @@ class PF2(Activity.Activity):
             return self.run_stack(image, callback)
 
     def update_preview(self):
-        fname = "/tmp/phf2-preview-%s.png" % getpass.getuser()
-        if(os.path.exists(fname)):
-            os.unlink(fname)
-        cv2.imwrite(fname, self.image)
-        self.pimage = GdkPixbuf.Pixbuf.new_from_file(fname)
-        GLib.idle_add(self.show_current)
+        if(not self.is_scaling):
+            image = self.create_pixbuf(self.image)
+            self.pimage = image
+
+            GLib.idle_add(self.show_current)
+
+
+
+    def create_pixbuf(self, im):
+        image = cv2.cvtColor(im.copy(), cv2.COLOR_BGR2RGB).astype(numpy.uint8)
+
+        pb = GdkPixbuf.Pixbuf.new_from_data(image.tostring(),
+                                            GdkPixbuf.Colorspace.RGB,
+                                            False,
+                                            8,
+                                            self.image.shape[1],
+                                            self.image.shape[0],
+                                            self.image.shape[2] * self.image.shape[1])
+
+        return pb
+
 
     def draw_hist(self, image):
         path = "/tmp/phf2-hist-%s.png" % getpass.getuser()
@@ -507,6 +605,14 @@ class PF2(Activity.Activity):
 
         if(do_update):
             self.update_preview()
+
+    def process_mask(self, do_update=False):
+        if(self.ui["edit_layer_mask_button"].get_active()):
+            self.image = self.get_selected_layer().get_layer_mask_preview(self.image)
+
+        if (do_update):
+            self.update_preview()
+
 
 
     ## FILE STUFF ##
@@ -582,7 +688,7 @@ class PF2(Activity.Activity):
             self.undo_position = 0
 
         GLib.idle_add(self.update_undo_state)
-        time.sleep(2)
+        #time.sleep(2)
         self.undoing = False
 
 
@@ -598,13 +704,15 @@ class PF2(Activity.Activity):
     def update_from_undo_stack(self, data):
         self.undoing = True
         self.delete_all_editable_layers()
+        print(data["layer-order"])
         for layer_name in data["layer-order"]:
             if (layer_name == "base"):
                 self.base_layer.set_from_layer_dict(data["layers"][layer_name])
             else:
-                ilayer = self.create_layer(layer_name, False, layer_name == self.pre_undo_layer_name)
+                ilayer = self.create_layer(layer_name, False, layer_name == self.pre_undo_layer_name, True)
                 ilayer.set_from_layer_dict(data["layers"][layer_name])
                 self.show_layers()
+
 
 
     def get_export_image(self, w, h):
@@ -618,8 +726,13 @@ class PF2(Activity.Activity):
         return img
 
     def export_progress_callback(self, name, count, current):
-        GLib.idle_add(self.show_message, "Exporting Photo", "Processing: %s" % name, True, True)
-        GLib.idle_add(self.update_message_progress, current, count)
+        layer_name = self.current_processing_layer_name
+        if(layer_name == "base"):
+            layer_name = "Base Layer"
+        GLib.idle_add(self.show_message, "Exporting Photo", "%s: %s" % (layer_name,
+                                                                                    name), True, True)
+        GLib.idle_add(self.update_message_progress, current+(self.current_processing_layer_index*count),
+                      count*len(self.layers))
 
 
 
@@ -649,27 +762,31 @@ class PF2(Activity.Activity):
 
             print(x, y)
 
-            if(not self.image_is_dirty):
-                fill = (0, 0, 255)
-                if(erase):
-                    fill = (255, 0, 0)
+            fill = (0, 0, 255)
+            if(erase):
+                fill = (255, 0, 0)
 
-                preview = self.current_layer_path.add_point(int(x), int(y), (pheight, pwidth, 3), fill)
+            self.draw_path(x, y, pheight, pwidth, fill)
 
-                # Bits per pixel
-                bpp = float(str(self.image.dtype).replace("uint", "").replace("float", ""))
-                # Pixel value range
-                np = float(2 ** bpp - 1)
-
-                self.image[preview == 255] = np
-                cv2.imwrite("/tmp/phf2-preview-%s-drag.png" % getpass.getuser(), self.image)
-                temppbuf = GdkPixbuf.Pixbuf.new_from_file("/tmp/phf2-preview-%s-drag.png" % getpass.getuser())
-                self.ui["preview"].set_from_pixbuf(temppbuf)
-
-            self.on_layer_change(layer)
+            self.on_layer_mask_change(layer)
 
             self.mouse_down_coords_changed(widget, event)
             return True
+
+
+    def draw_path(self, x, y, pheight, pwidth, fill):
+        preview = self.current_layer_path.add_point(int(x), int(y), (pheight, pwidth, 3), fill)
+
+        # Bits per pixel
+        bpp = float(str(self.image.dtype).replace("uint", "").replace("float", ""))
+        # Pixel value range
+        np = float(2 ** bpp - 1)
+
+        self.image[preview == 255] = np
+        cv2.imwrite("/tmp/phf2-preview-%s-drag.png" % getpass.getuser(), self.image)
+        temppbuf = GdkPixbuf.Pixbuf.new_from_file("/tmp/phf2-preview-%s-drag.png" % getpass.getuser())
+        self.ui["preview"].set_from_pixbuf(temppbuf)
+
 
     def new_path(self, widget, event):
         draw = self.ui["mask_draw_toggle"].get_active()
@@ -696,13 +813,21 @@ class PF2(Activity.Activity):
         self.ui["mask_draw_toggle"].set_active(widget.get_active())
         self.ui["mask_erase_toggle"].set_active(False)
         self.ui["scroll_window"].queue_draw()
+        if (widget.get_active()):
+            thread = threading.Thread(target=self.process_mask, args=(True,))
+            thread.start()
+        elif(self.was_editing_mask):
+            self.on_layer_change(self.get_selected_layer())
+
+        self.was_editing_mask = widget.get_active()
 
     def update_layer_opacity(self, sender):
         layer = self.get_selected_layer()
-        layer.set_opacity(sender.get_value())
+        if(layer.opacity != sender.get_value()):
+            layer.set_opacity(sender.get_value())
 
 
-    def create_layer(self, layer_name, is_base, select = False):
+    def create_layer(self, layer_name, is_base, select = False, set_pre_undo_draw_state = False):
         layer = Layer.Layer(is_base, layer_name, self.on_layer_change)
         for tool in self.tools:
             tool_instance = tool()
@@ -710,11 +835,11 @@ class PF2(Activity.Activity):
 
         self.layers += [layer,]
 
-        GLib.idle_add(self.create_layer_ui, layer, select)
+        GLib.idle_add(self.create_layer_ui, layer, select, set_pre_undo_draw_state)
 
         return layer
 
-    def create_layer_ui(self, layer, select):
+    def create_layer_ui(self, layer, select, set_pre_undo_draw_state = False):
         layer_box = Gtk.HBox()
         layer_box.set_hexpand(False)
         layer_box.set_halign(Gtk.Align.START)
@@ -755,6 +880,11 @@ class PF2(Activity.Activity):
         if(select):
             self.select_layer(layer)
 
+        if(set_pre_undo_draw_state) and self.get_selected_layer().editable:
+            print(self.pre_undo_editing, self.pre_undo_erasing)
+            self.ui["mask_erase_toggle"].set_active(self.pre_undo_erasing)
+            self.ui["edit_layer_mask_button"].set_active(self.pre_undo_editing)
+
 
     def layer_ui_activated(self, widget, row):
         layer_index = row.get_index()
@@ -768,6 +898,8 @@ class PF2(Activity.Activity):
         self.ui["layer_opacity"].set_value(self.layers[layer_index].opacity)
         if(self.ui["edit_layer_mask_button"].get_active()):
             self.ui["edit_layer_mask_button"].set_active(self.layers[layer_index].editable)
+            self.on_layer_change(self.last_selected_layer)
+            self.last_selected_layer = self.get_selected_layer()
 
     def toggle_layer(self, sender, layer):
         layer.set_enabled(sender.get_active())
@@ -858,7 +990,7 @@ class PF2(Activity.Activity):
                 context.set_source_rgb(255, 0, 0)
             else:
                 context.set_source_rgb(255, 255, 255)
-            context.arc(self.mousex, self.mousey, size/2.0, 0.0, 2 * numpy.pi);
+            context.arc(self.mousex, self.mousey, size/2.0, 0.0, 2 * numpy.pi)
             context.stroke()
 
     def mouse_coords_changed(self, widget, event):
@@ -876,4 +1008,5 @@ class PF2(Activity.Activity):
 
     def layer_blend_mode_changed(self, sender):
         layer = self.get_selected_layer()
-        layer.set_blending_mode(sender.get_active_text().lower())
+        if(layer.blend_mode != sender.get_active_text().lower()):
+            layer.set_blending_mode(sender.get_active_text().lower())

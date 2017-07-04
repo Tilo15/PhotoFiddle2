@@ -4,7 +4,6 @@ import cv2
 
 class Layer:
     def __init__(self, base, name, on_change):
-        print("init", name)
         self.mask = VectorMask.VectorMask()
         self.tools = []
         self.tool_map = {}
@@ -27,12 +26,13 @@ class Layer:
         self.tool_stack.set_transition_type(6)
         self.tool_stack.set_homogeneous(False)
 
+        self.layer_copy = None
+
 
         self.layer_changed = on_change
 
 
     def add_tool(self, tool):
-        print("add tool", tool)
         self.tool_box.add(tool.tool_button)
         self.tool_stack.add(tool.widget)
         self.tool_map[tool.tool_button] = tool
@@ -78,7 +78,6 @@ class Layer:
         return layerDict
 
     def set_from_layer_dict(self, dict):
-        print("set_from_layer_dict", dict)
         # Load Tool Data
         for tool in self.tools:
             if(tool.id in dict["tools"]):
@@ -135,15 +134,40 @@ class Layer:
             # Here we would blend with the mask
             else:
                 mask_map = self.mask.get_mask_map()
-                height, width = layer.shape[:2]
-                mask_map = cv2.resize(mask_map, (width, height), interpolation=cv2.INTER_AREA)
-                mask_map = mask_map * self.opacity
+                if(mask_map != None):
+                    # Only process if there is actually an existing mask
+                    height, width = layer.shape[:2]
+                    mask_map = cv2.resize(mask_map, (width, height), interpolation=cv2.INTER_AREA)
+                    mask_map = mask_map * self.opacity
 
-                inverted_map = (mask_map * -1) + 1
-                for i in range(0,3):
-                    image[0:, 0:, i] = (layer[0:, 0:, i] * mask_map) + (image[0:, 0:, i] * inverted_map)
+                    inverted_map = (mask_map * -1) + 1
+                    for i in range(0,3):
+                        image[0:, 0:, i] = (layer[0:, 0:, i] * mask_map) + (image[0:, 0:, i] * inverted_map)
+
+        self.layer_copy = image.copy()
 
         return image
+
+    def get_layer_mask_preview(self, image):
+        mask =  self.mask.get_mask_map()
+
+        if(mask != None):
+            w, h = image.shape[:2]
+
+            # Bits per pixel
+            bpp = float(str(image.dtype).replace("uint", "").replace("float", ""))
+            # Pixel value range
+            np = float(2 ** bpp - 1)
+
+            mask = cv2.resize(mask, (h, w), interpolation=cv2.INTER_AREA)
+            inverted_map = (mask * -1) + 1
+            image[0:, 0:, 2] = (np * mask) + (image[0:, 0:, 2] * inverted_map)
+
+        return image
+
+
+
+
 
 
 

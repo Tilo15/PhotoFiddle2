@@ -10,22 +10,25 @@ class Path:
         self.scale = scale
         self.brush_feather = brush_feather
         self.additive = additive
+        self.has_rendered = False
 
     def add_point(self, x, y, previewShape = None, fill = None):
         self.points.append([x,y])
+        self.has_rendered = False
         if(previewShape != None and fill != None and len(self.points) > 1):
             preview = numpy.zeros(previewShape, dtype=numpy.uint8)
             points = self.points[-2:]
-            print(points)
             sx = points[0][0]
             sy = points[0][1]
             fx = points[1][0]
             fy = points[1][1]
             cv2.line(preview, (sx, sy), (fx, fy), (fill), int(self.brush_size), cv2.LINE_4)
+
             return preview
 
 
     def get_mask_map(self, mask):
+        self.has_rendered = True
         if(self.additive):
             return self.draw_additive_path(mask)
         else:
@@ -42,11 +45,11 @@ class Path:
 
         if(self.brush_feather > 1):
             blur_size = 2 * round((round(self.brush_feather) + 1) / 2) - 1
-            map = cv2.GaussianBlur(map, (int(blur_size), int(blur_size)), 0)
+            map = cv2.blur(map, (int(blur_size), int(blur_size)))
             map = map[:, :, numpy.newaxis]
 
         # Painful workaround for int overflow
-        mask2 = mask.astype(numpy.uint64)
+        mask2 = mask.astype(numpy.uint16)
         mask2 = mask2 + map
         mask2[mask2 > 255] = 255
         mask = mask2.astype(numpy.uint8)

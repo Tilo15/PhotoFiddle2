@@ -7,6 +7,7 @@ class VectorMask:
         self.paths = []
         self.width = 0
         self.height = 0
+        self.__map = None
 
     def set_dimentions(self, width, height):
         self.width = width
@@ -18,21 +19,28 @@ class VectorMask:
         return path
 
     def get_mask_map(self):
-        map = numpy.zeros((self.height, self.width, 1), dtype=numpy.uint8)
+        if(self.has_updated()):
 
-        print(map.shape)
+            map = numpy.zeros((self.height, self.width, 1), dtype=numpy.uint8)
 
+            for path in self.paths:
+                map = path.get_mask_map(map)
+
+            map32 = map.astype(numpy.float32)
+            map32 = map32 / 255.0
+
+            self.__map = map32
+
+        return self.__map
+
+    def has_updated(self):
+        res = True
         for path in self.paths:
-            map = path.get_mask_map(map)
+            res &= path.has_rendered
 
-        print(map.shape)
+        return not res
 
-        map32 = map.astype(numpy.float32)
-        map32 = map32 / 255.0
 
-        print(map32.shape)
-
-        return map32
 
     def get_vector_mask_dict(self):
         paths = []
