@@ -1,4 +1,5 @@
 import cv2
+import numpy
 
 import Tool
 
@@ -11,7 +12,7 @@ class Tonemap(Tool.Tool):
         self.properties = [
             Tool.Property("enabled", "Tone Mapping", "Header", False, has_toggle=True, has_button=False),
             Tool.Property("strength", "Strength", "Slider", 90, max=100, min=0),
-            Tool.Property("bleed", "Bleed", "Slider", 10, max=100, min=0),
+            Tool.Property("bleed", "Sharpness", "Slider", 10, max=100, min=0),
             Tool.Property("contrast", "Contrast", "Slider", 25, max=100, min=0),
             Tool.Property("two_pass", "Two Pass", "Toggle", False)
         ]
@@ -38,9 +39,12 @@ class Tonemap(Tool.Tool):
 
                 # Blur
                 if(blur > 0):
-                    height, width = inverted.shape[:2]
-                    imsize = (height + width) / float(2)
-                    blur_size = 2 * round(round((imsize * (blur / 100.0)) / 2)) - 1
+
+                    height, width = image.shape[:2]
+                    size = (height * width)
+                    mul = numpy.math.sqrt(size) / 1064.416  # numpy.math.sqrt(1132982.0)
+
+                    blur_size = 2 * round((round((blur/10.0) * mul) + 1) / 2) - 1
                     blurred = cv2.GaussianBlur(inverted, (int(blur_size), int(blur_size)), 0)
                 else:
                     # Or, don't blur

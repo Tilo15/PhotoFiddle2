@@ -28,8 +28,12 @@ class Blur(Tool.Tool):
             strength = self.props["strength"].get_value()
             method = self.props["method"].get_value()
 
+            height, width = image.shape[:2]
+            size = (height*width)
+            mul = numpy.math.sqrt(size) / 1064.416 #numpy.math.sqrt(1132982.0)
+
             if (strength > 0):
-                blur_size = 2 * round((round(strength) + 1) / 2) - 1
+                blur_size = 2 * round((round(strength*mul) + 1) / 2) - 1
                 if(method == 0):
                     im = cv2.GaussianBlur(im, (int(blur_size), int(blur_size)), 0)
 

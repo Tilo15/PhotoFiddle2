@@ -378,8 +378,8 @@ class PF2(Activity.Activity):
         self.on_export_state_change()
 
     def update_undo_state(self):
-        self.ui["undo"].set_sensitive(self.undo_position > 0)
-        self.ui["redo"].set_sensitive(len(self.undo_stack)-1 > self.undo_position)
+        self.ui["undo"].set_sensitive((self.undo_position > 0) and (not self.is_working))
+        self.ui["redo"].set_sensitive((len(self.undo_stack)-1 > self.undo_position)  and (not self.is_working))
 
     def on_undo(self, sender):
         self.pre_undo_layer_name = self.get_selected_layer().name
@@ -497,10 +497,18 @@ class PF2(Activity.Activity):
         if(not immediate):
             time.sleep(0.5)
         self.additional_change_occurred = False
+        self.is_working = True
+        GLib.idle_add(self.update_undo_state)
         GLib.idle_add(self.start_work)
         image = numpy.copy(self.original_image)
         rst = time.time()
         self.image = self.run_stack(image, changed_layer=changed_layer)
+        if(self.image == None):
+            GLib.idle_add(self.stop_work)
+            self.is_working = False
+            GLib.idle_add(self.update_undo_state)
+            raise Exception()
+
         self.process_mask()
         self.image_is_dirty = False
         if(self.additional_change_occurred):
@@ -511,6 +519,8 @@ class PF2(Activity.Activity):
             self.process_peaks()
             self.update_preview()
             GLib.idle_add(self.stop_work)
+            self.is_working = False
+            GLib.idle_add(self.update_undo_state)
             self.change_occurred = False
             self.undoing = False
 
@@ -522,38 +532,45 @@ class PF2(Activity.Activity):
 
             baseImage = image.copy()
 
-            image = None
+            try:
 
-            carry = True
-            if(baseImage.shape == self.image.shape) and (changed_layer != None) and (changed_layer in self.layers):
-                changed_layer_index = self.layers.index(changed_layer)
-                if(changed_layer_index > 0):
-                    carry = False
-                    layer_under = self.layers[changed_layer_index -1]
-                    image = layer_under.layer_copy.copy()
-                    for layer in self.layers[changed_layer_index: ]:
+                image = None
+
+                carry = True
+                if(self.image != None) and (baseImage.shape == self.image.shape) and (changed_layer != None) and (changed_layer in self.layers):
+                    changed_layer_index = self.layers.index(changed_layer)
+                    if(changed_layer_index > 0):
+                        carry = False
+                        layer_under = self.layers[changed_layer_index -1]
+                        image = layer_under.layer_copy.copy()
+                        for layer in self.layers[changed_layer_index: ]:
+                            self.current_processing_layer_name = layer.name
+                            self.current_processing_layer_index = self.layers.index(layer)
+                            if(self.additional_change_occurred):
+                                break
+                            print(layer)
+                            image = layer.render_layer(baseImage, image, callback)
+
+
+                if(carry):
+                    for layer in self.layers:
                         self.current_processing_layer_name = layer.name
                         self.current_processing_layer_index = self.layers.index(layer)
-                        if(self.additional_change_occurred):
+                        if (self.additional_change_occurred):
                             break
                         print(layer)
                         image = layer.render_layer(baseImage, image, callback)
 
 
-            if(carry):
-                for layer in self.layers:
-                    self.current_processing_layer_name = layer.name
-                    self.current_processing_layer_index = self.layers.index(layer)
-                    if (self.additional_change_occurred):
-                        break
-                    print(layer)
-                    image = layer.render_layer(baseImage, image, callback)
 
 
+                self.running_stack = False
+                return image
 
+            except(Exception):
+                GLib.idle_add(self.show_message, "Image Render Failed…",
+                              "PhotoFiddle encountered an internal error and was unable to render the image.")
 
-            self.running_stack = False
-            return image
 
         else:
             while(self.running_stack):

@@ -22,7 +22,7 @@ Gtk.Settings.get_default().set_property("gtk_application_prefer_dark_theme", Tru
 class App(Gtk.Application):
     def __init__(self):
         Gtk.Application.__init__(self,
-                                 application_id="com.pcthingz.photofiddle2",
+                                 application_id="com.pcthingz.photofiddle",
                                  flags=Gio.ApplicationFlags.FLAGS_NONE)
 
         self.connect("activate", self.activateCb)
