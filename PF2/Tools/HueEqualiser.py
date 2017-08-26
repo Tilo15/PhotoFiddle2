@@ -11,6 +11,7 @@ class HueEqualiser(Tool.Tool):
         self.properties = [
             Tool.Property("header", "Hue Equaliser", "Header", None, has_toggle=False, has_button=False),
             Tool.Property("bleed", "Hue Bleed", "Slider", 0.5, max=2.0, min=0.01),
+            Tool.Property("neighbour_bleed", "Neighbour Bleed", "Slider", 0.25, max=2.0, min=0.0),
             # Red
             Tool.Property("header_red", "Red", "Header", None, has_toggle=False, has_button=False),
             Tool.Property("red_value", "Value", "Slider", 0, max=50, min=-50),
@@ -52,6 +53,7 @@ class HueEqualiser(Tool.Tool):
 
         if(not self.is_default()):
             bleed = self.props["bleed"].get_value()
+            neighbour_bleed = self.props["neighbour_bleed"].get_value()
 
             out = out.astype(numpy.float32)
 
@@ -72,6 +74,8 @@ class HueEqualiser(Tool.Tool):
                 hval = self.props["%s_value" % hue.replace('_', '')].get_value()
 
                 isHue = self._is_hue(imhue, hues[hue], (3.5/bleed))
+
+                isHue = self._neighbour_bleed(isHue, neighbour_bleed)
 
                 imsat = imsat + ((hsat / 10000) * 255) * isHue
                 imval = imval + ((hval / 1000) * np) * isHue
@@ -130,3 +134,19 @@ class HueEqualiser(Tool.Tool):
             icopy[(icopy > mir) * (icopy != 0.0)] = ((((icopy[(icopy > mir) * (icopy != 0.0)]) - mir) / 360.0) / (bleed/360.0)) * -1 + 1
 
         return icopy
+
+    def _neighbour_bleed(self, map, bleed):
+        strength = bleed*30
+
+        if (strength > 0):
+            height, width = map.shape[:2]
+            size = (height * width)
+            mul = numpy.math.sqrt(size) / 1064.416  # numpy.math.sqrt(1132982.0)
+
+            map = map*255
+
+            blur_size = 2 * round((round(strength * mul) + 1) / 2) - 1
+            im = cv2.blur(map, (int(blur_size), int(blur_size)))
+            return im/255.0
+
+        return map

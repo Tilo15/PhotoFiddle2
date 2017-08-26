@@ -506,7 +506,11 @@ class PF2(Activity.Activity):
         if(self.image == None):
             GLib.idle_add(self.stop_work)
             self.is_working = False
+            self.change_occurred = False
             GLib.idle_add(self.update_undo_state)
+            print("self.image == None")
+            GLib.idle_add(self.show_message, "Image Render Failed…",
+                          "PhotoFiddle encountered an internal error and was unable to render the image… Please try again.")
             raise Exception()
 
         self.process_mask()
