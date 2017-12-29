@@ -12,6 +12,9 @@ class Contrast(Tool.Tool):
             Tool.Property("header", "Brightness and Contrast", "Header", None, has_toggle=False, has_button=False),
             Tool.Property("overall_brightness", "Brightness", "Slider", 0, max=50, min=-50),
             Tool.Property("overall_contrast", "Contrast", "Slider", 0, max=50, min=-50),
+            Tool.Property("hist_stretch", "Histogram Strecthing", "Header", None, has_toggle=False, has_button=False),
+            Tool.Property("left_stretch", "Left Stretch", "Slider", 0, max=50, min=-50),
+            Tool.Property("right_stretch", "Right Stretch", "Slider", 0, max=50, min=-50),
             Tool.Property("tonal_header", "Tonal Brightness and Contrast", "Header", None, has_toggle=False, has_button=False),
             Tool.Property("highlight_brightness", "Highlight Brightness", "Slider", 0, max=50, min=-50),
             Tool.Property("highlight_contrast", "Highlight Contrast", "Slider", 0, max=50, min=-50),
@@ -31,6 +34,9 @@ class Contrast(Tool.Tool):
         if(not self.is_default()):
             ob = self.props["overall_brightness"].get_value()
             oc = -self.props["overall_contrast"].get_value()
+
+            ls = -self.props["left_stretch"].get_value()
+            rs = -self.props["right_stretch"].get_value()
 
             hb = self.props["highlight_brightness"].get_value()
             hc = self.props["highlight_contrast"].get_value()
@@ -61,6 +67,17 @@ class Contrast(Tool.Tool):
             np = float(2 ** bpp - 1)
 
             out = im.astype(numpy.float32)
+
+
+            # Histogram Stretch
+            if(rs != 0 or ls != 0):
+                maxpxv = np + (rs/100.0)*np
+                minpxv = 0 - (ls/100.0)*np
+                
+                out = (out - minpxv) * (np/float(maxpxv))
+                
+            
+
 
             # Highlights
 

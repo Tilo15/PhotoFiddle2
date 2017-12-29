@@ -1,6 +1,6 @@
 from gi.repository import Gtk, GLib
 import PF2.VectorMask as VectorMask
-import cv2
+import cv2, numpy
 
 class Layer:
     def __init__(self, base, name, on_change):
@@ -124,6 +124,7 @@ class Layer:
 
                 # Call the tool's image processing function
                 layer = tool.on_update(layer)
+                assert type(layer) == numpy.ndarray
                 count += 1
 
 
@@ -134,9 +135,10 @@ class Layer:
             # Here we would blend with the mask
             else:
                 mask_map = self.mask.get_mask_map()
-                if(mask_map != None):
+                if(type(mask_map) == numpy.ndarray):
                     # Only process if there is actually an existing mask
                     height, width = layer.shape[:2]
+
                     mask_map = cv2.resize(mask_map, (width, height), interpolation=cv2.INTER_AREA)
                     mask_map = mask_map * self.opacity
 
@@ -151,7 +153,7 @@ class Layer:
     def get_layer_mask_preview(self, image):
         mask =  self.mask.get_mask_map()
 
-        if(mask != None):
+        if(type(mask) == numpy.ndarray):
             w, h = image.shape[:2]
 
             # Bits per pixel

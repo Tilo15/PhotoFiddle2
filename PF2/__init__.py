@@ -8,6 +8,8 @@ import cv2
 import numpy
 import getpass
 import os
+import traceback
+import uuid
 
 from PF2 import Histogram, Layer
 from PF2.Tools import BlackWhite
@@ -151,6 +153,7 @@ class PF2(Activity.Activity):
         self.is_scaling = False
         self.current_processing_layer_name = "base"
         self.current_processing_layer_index = 0
+        self.update_image_task_id = ""
 
         # Setup Open Dialog
         self.ui["open_window"].set_transient_for(self.root)
@@ -211,9 +214,6 @@ class PF2(Activity.Activity):
         else:
             self.image_path = path
 
-        w = (self.ui["scroll_window"].get_allocated_width() - 12) * self.ui["zoom"].get_value()
-        h = (self.ui["scroll_window"].get_allocated_height() - 12) * self.ui["zoom"].get_value()
-
         self.show_message("Loading Photo…", "Please wait while PhotoFiddle loads your photo", True)
         self.root.get_titlebar().set_subtitle("%s…" % (self.image_path))
 
@@ -226,6 +226,9 @@ class PF2(Activity.Activity):
 
         self.select_layer(self.base_layer)
 
+        w = (self.ui["scroll_window"].get_allocated_width() - 12) * self.ui["zoom"].get_value()
+        h = (self.ui["scroll_window"].get_allocated_height() - 12) * self.ui["zoom"].get_value()
+        
         thread = threading.Thread(target=self.open_image,
                                   args=(w, h))
         thread.start()
@@ -290,7 +293,7 @@ class PF2(Activity.Activity):
         if(self.is_exporting):
             return False
         else:
-            fname = "/tmp/phf2-preview-%s.png" % getpass.getuser()
+            fname = "/dev/shm/phf2-preview-%s.png" % getpass.getuser()
             if (os.path.exists(fname)):
                 os.unlink(fname)
 
@@ -414,13 +417,17 @@ class PF2(Activity.Activity):
 
             # Read the 8Bit Preview
             self.source_image = cv2.imread(self.image_path).astype(numpy.uint8)
-
+            
             # Load the image
             self.resize_preview(w, h)
         except:
             pass
-        while(self.image == None):
+        while(type(self.image) != numpy.ndarray):
             time.sleep(1)
+            
+        self.pwidth = 0
+        self.pheight = 0
+           
         GLib.idle_add(self.image_opened)
         time.sleep(1)
         self.has_loaded = True
@@ -428,7 +435,8 @@ class PF2(Activity.Activity):
 
 
     def resize_preview(self, w, h):
-        if(self.source_image != None):
+        print(w, h)
+        if(type(self.source_image) == numpy.ndarray):
             # Inhibit undo stack to prevent
             # Adding an action on resize
             self.undoing = True
@@ -462,7 +470,7 @@ class PF2(Activity.Activity):
             #     self.pimage = self.pimage = self.create_pixbuf(image)
             #     GLib.idle_add(self.show_current)
 
-            if(self.pimage != None and not self.is_scaling):
+            if(type(self.pimage) == numpy.ndarray and not self.is_scaling):
                 self.is_scaling = True
                 # If we have an edited version, show that
                 image = self.pimage.scale_simple(int(nw), int(nh), GdkPixbuf.InterpType.NEAREST)
@@ -472,7 +480,7 @@ class PF2(Activity.Activity):
 
             self.poriginal = GdkPixbuf.Pixbuf.new_from_file_at_scale(self.image_path,
                                                                 int(nw), int(nh), True)
-            if(self.pimage == None):
+            if(type(self.pimage) != numpy.ndarray):
                 # Otherwise show the original
                 GLib.idle_add(self.show_original)
 
@@ -502,31 +510,36 @@ class PF2(Activity.Activity):
         GLib.idle_add(self.start_work)
         image = numpy.copy(self.original_image)
         rst = time.time()
-        self.image = self.run_stack(image, changed_layer=changed_layer)
-        if(self.image == None):
-            GLib.idle_add(self.stop_work)
-            self.is_working = False
-            self.change_occurred = False
-            GLib.idle_add(self.update_undo_state)
-            print("self.image == None")
-            GLib.idle_add(self.show_message, "Image Render Failed…",
-                          "PhotoFiddle encountered an internal error and was unable to render the image… Please try again.")
-            raise Exception()
+        task_id = uuid.uuid4()
+        self.update_image_task_id = task_id
+        image = self.run_stack(image, changed_layer=changed_layer)
+        if(task_id == self.update_image_task_id):
+            self.image = image
+            if(type(self.image) != numpy.ndarray):
+                GLib.idle_add(self.stop_work)
+                self.is_working = False
+                self.change_occurred = False
+                GLib.idle_add(self.update_undo_state)
+                print("self.image == None")
+                GLib.idle_add(self.show_message, "Image Render Failed…",
+                              "PhotoFiddle encountered an internal error and was unable to render the image… Please try again.")
+                raise Exception()
 
-        self.process_mask()
-        self.image_is_dirty = False
-        if(self.additional_change_occurred):
-            self.update_image()
-        else:
-            self.save_image_data()
-            threading.Thread(target=self.draw_hist, args=(self.image,)).start()
-            self.process_peaks()
-            self.update_preview()
-            GLib.idle_add(self.stop_work)
-            self.is_working = False
-            GLib.idle_add(self.update_undo_state)
-            self.change_occurred = False
-            self.undoing = False
+            self.process_mask()
+            self.image_is_dirty = False
+            if(self.additional_change_occurred):
+                self.update_image()
+            else:
+                self.save_image_data()
+                threading.Thread(target=self.draw_hist, args=(self.image,)).start()
+
+                self.process_peaks()
+                self.update_preview()
+                GLib.idle_add(self.stop_work)
+                self.is_working = False
+                GLib.idle_add(self.update_undo_state)
+                self.change_occurred = False
+                self.undoing = False
 
 
 
@@ -541,7 +554,7 @@ class PF2(Activity.Activity):
                 image = None
 
                 carry = True
-                if(self.image != None) and (baseImage.shape == self.image.shape) and (changed_layer != None) and (changed_layer in self.layers):
+                if(type(self.image) == numpy.ndarray) and (baseImage.shape == self.image.shape) and (changed_layer != None) and (changed_layer in self.layers):
                     changed_layer_index = self.layers.index(changed_layer)
                     if(changed_layer_index > 0):
                         carry = False
@@ -571,7 +584,9 @@ class PF2(Activity.Activity):
                 self.running_stack = False
                 return image
 
-            except(Exception):
+            except Exception as e:
+                print(e)
+                traceback.print_exc()
                 GLib.idle_add(self.show_message, "Image Render Failed…",
                               "PhotoFiddle encountered an internal error and was unable to render the image.")
 
@@ -583,30 +598,24 @@ class PF2(Activity.Activity):
             return self.run_stack(image, callback)
 
     def update_preview(self):
-        if(not self.is_scaling):
-            image = self.create_pixbuf(self.image)
-            self.pimage = image
-
-            GLib.idle_add(self.show_current)
+        image = self.create_pixbuf(self.image)
+        self.pimage = image
+        GLib.idle_add(self.show_current)
 
 
 
     def create_pixbuf(self, im):
-        image = cv2.cvtColor(im.copy(), cv2.COLOR_BGR2RGB).astype(numpy.uint8)
-
-        pb = GdkPixbuf.Pixbuf.new_from_data(image.tostring(),
-                                            GdkPixbuf.Colorspace.RGB,
-                                            False,
-                                            8,
-                                            self.image.shape[1],
-                                            self.image.shape[0],
-                                            self.image.shape[2] * self.image.shape[1])
+        pb = None
+        write_id = uuid.uuid4()
+        cv2.imwrite("/dev/shm/phf2-preview-%s-update.png" % write_id, im)
+        pb = GdkPixbuf.Pixbuf.new_from_file("/dev/shm/phf2-preview-%s-update.png" % write_id)
+        os.unlink("/dev/shm/phf2-preview-%s-update.png" % write_id)
 
         return pb
 
 
     def draw_hist(self, image):
-        path = "/tmp/phf2-hist-%s.png" % getpass.getuser()
+        path = "/dev/shm/phf2-hist-%s.png" % getpass.getuser()
         Histogram.Histogram.draw_hist(image, path)
         GLib.idle_add(self.update_hist_ui, path)
 
@@ -804,8 +813,8 @@ class PF2(Activity.Activity):
         np = float(2 ** bpp - 1)
 
         self.image[preview == 255] = np
-        cv2.imwrite("/tmp/phf2-preview-%s-drag.png" % getpass.getuser(), self.image)
-        temppbuf = GdkPixbuf.Pixbuf.new_from_file("/tmp/phf2-preview-%s-drag.png" % getpass.getuser())
+        cv2.imwrite("/dev/shm/phf2-preview-%s-drag.png" % getpass.getuser(), self.image)
+        temppbuf = GdkPixbuf.Pixbuf.new_from_file("/dev/shm/phf2-preview-%s-drag.png" % getpass.getuser())
         self.ui["preview"].set_from_pixbuf(temppbuf)
 
 
