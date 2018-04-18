@@ -35,7 +35,7 @@ class Tonemap(Tool.Tool):
                 gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
 
                 # Invert Grayscale Image
-                inverted = self._invert(gray)
+                inverted = cv2.UMat(self._invert(gray))
 
                 # Blur
                 if(blur > 0):
@@ -52,7 +52,7 @@ class Tonemap(Tool.Tool):
 
                 # First round of Blending
                 colour = cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR)
-                colouredMap = cv2.addWeighted(colour, (first_opacity / 100), im, 1 - (first_opacity / 100), 0)
+                colouredMap = cv2.addWeighted(colour, (first_opacity / 100), im, 1 - (first_opacity / 100), 0).get()
 
                 # Overlay
                 bpp = int(str(im.dtype).replace("uint", "").replace("float", ""))

@@ -54,6 +54,8 @@ class Details(Tool.Tool):
             # Apply Brightness and Contrast
             edged = self.contrast_tool.on_update(edged)
 
+            edged = cv2.UMat(edged)
+
             # Blur
             if(detail > 0):
                 height, width = image.shape[:2]
@@ -69,7 +71,7 @@ class Details(Tool.Tool):
             # Overlay
             colour = cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR)
             bpp = int(str(im.dtype).replace("uint", "").replace("float", ""))
-            blended = self._overlay(colour, im, float((2 ** bpp) - 1), im.dtype)
+            blended = self._overlay(colour.get(), im, float((2 ** bpp) - 1), im.dtype)
 
             # Restore Contrast
             self.contrast_tool_restore.props["highlight_contrast"].set_value(pcont * 0.25)
