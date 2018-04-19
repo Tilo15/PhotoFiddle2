@@ -278,6 +278,8 @@ class PF2(Activity.Activity):
 
 
     def on_open(self, path):
+        # TODO remove
+        cv2.namedWindow( "Display window", cv2.WINDOW_AUTOSIZE );
         self.root.get_titlebar().set_subtitle("Raster Editor")
         if(path != None):
             # We have been sent here from another
@@ -358,7 +360,7 @@ class PF2(Activity.Activity):
             thread = threading.Thread(target=self.update_image, args=(True,))
             thread.start()
 
-    def image_opened(self):
+    def image_opened(self): 
         self.root.get_titlebar().set_subtitle("%s (%s Bit)" % (self.image_path, self.bit_depth))
         self.hide_message()
 
