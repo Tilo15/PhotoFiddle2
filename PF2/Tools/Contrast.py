@@ -1,6 +1,7 @@
 import numpy
 import cv2
 from PF2.Scalar import Scalar
+from PF2.Utilities import HMS
 import Tool
 
 
@@ -87,7 +88,7 @@ class Contrast(Tool.Tool):
 
             # Highlights
 
-            isHr = self._is_highlight(out, (3.0 / hbl), np)
+            isHr = HMS.is_highlight(out, (3.0 / hbl), np)
             if (hc != 0.0):
                 # Highlight Contrast
                 #out = (((hn * ((hc * isHr) + np)) / (np * (hn - (hc * isHr)))) * (out - np / 2.0) + np / 2.0)
@@ -124,7 +125,7 @@ class Contrast(Tool.Tool):
             # Midtones
 
 
-            #isMt = self._is_midtone(out, (3.0 / mbl), np)
+            isMt = HMS.is_midtone(out, (3.0 / mbl), np)
             if (mc != 0.0):
                 # Midtone Contrast
                 #out = (((hn * ((hc * isHr) + np)) / (np * (hn - (hc * isHr)))) * (out - np / 2.0) + np / 2.0)
@@ -159,7 +160,7 @@ class Contrast(Tool.Tool):
             # Shadows
 
 
-            isSh = self._is_shadow(out, (3.0 / sbl), np)
+            isSh = HMS.is_shadow(out, (3.0 / sbl), np)
             if (sc != 0.0):
                 # Shadow Contrast
                 #out = (((hn * ((hc * isHr) + np)) / (np * (hn - (hc * isHr)))) * (out - np / 2.0) + np / 2.0)
@@ -201,79 +202,4 @@ class Contrast(Tool.Tool):
         else:
             return im
 
-
-    def _is_highlight(self, image, bleed_value = 6.0, np=255):
-        bleed = float(np / bleed_value)
-        mif = np / 3.0 * 2.0
-
-        #icopy[icopy < mif - bleed] = 0.0
-        #icopy[(icopy < mif) * (icopy != 0.0)] = ((mif - (icopy[(icopy < mif) * (icopy != 0.0)])) / bleed) * -1 + 1
-        #icopy[icopy >= mif] = 1.0
-        #return icopy
-        # The following is based upon the above old procedure
-
-        # Make everything below (mif - bleed) = 0
-        icopy = cv2.add(image, Scalar(0), dtype=cv2.CV_32F)
-        ret, icopy = cv2.threshold(icopy, mif - bleed, np, cv2.THRESH_TOZERO)
-
-        # Calculate bleed
-        bld = cv2.subtract(Scalar(mif), icopy)
-        bld = cv2.divide(bld, Scalar(bleed))
-        bld = cv2.multiply(bld, Scalar(-1))
-        bld = cv2.add(bld, Scalar(1))
-        res, bld = cv2.threshold(bld, 0.0, 1.0, cv2.THRESH_TOZERO)
-
-        return bld
-
-
-
-    def _is_midtone(self, image, bleed_value = 6.0):
-        bleed = float(image.max() / bleed_value)
-        mif = image.max() / 3.0
-        mir = image.max() / 3.0 * 2.0
-        icopy = image.copy()
-
-        icopy[icopy < mif - bleed] = 0.0
-        icopy[icopy > mir + bleed] = 0.0
-
-        icopy[(icopy < mif) * (icopy != 0.0)] = ((mif - (icopy[(icopy < mif) * (icopy != 0.0)])) / bleed) * -1 + 1
-        icopy[(icopy > mir) * (icopy != 0.0)] = (((icopy[(icopy > mir) * (icopy != 0.0)]) - mir) / bleed) * -1 + 1
-        icopy[(icopy >= mif) * (icopy <= mir)] = 1.0
-        return icopy
-
-    def _is_shadow(self, image, bleed_value=6.0, np=255):
-        inv = cv2.multiply(image, Scalar(-1))
-        inv = cv2.add(inv, Scalar(np))
-        return self._is_highlight(inv, bleed_value,)
-
-
-        bleed = float(np / bleed_value)
-        mir = np / 3.0
-
-        icopy = cv2.add(image, Scalar(0), dtype=cv2.CV_32F)
-
-        # Make everything below mir = 1
-        # ret, shadow_mask = cv2.threshold(icopy, mir, np, cv2.THRESH_BINARY_INV)
-        # icopy = cv2.bitwise_and(icopy, shadow_mask)
-    
-        # Make everything above (mir + bleed) = 0
-        #ret, icopy = cv2.threshold(icopy, mir + bleed, np, cv2.THRESH_TOZERO_INV)
-
-        # Calculate bleed
-        bld = cv2.subtract(icopy, Scalar(mir))
-        bld = cv2.divide(bld, Scalar(bleed))
-        bld = cv2.multiply(bld, Scalar(-1))
-        bld = cv2.add(bld, Scalar(1))
-        res, bld = cv2.threshold(bld, 1.0, np, cv2.THRESH_TRUNC)
-
-        print(bld.get().max(), bld.get().min())
-        cv2.imshow("Display window", bld)
-        cv2.imshow("Display thresh", icopy)
-
-        return bld
-
-        # icopy[icopy <= mir] = 1.0
-        # icopy[icopy > mir + bleed] = 0.0
-        #icopy[icopy > mir] = (((icopy[(icopy > mir) * (icopy != 0.0)]) - mir) / bleed) * -1 + 1
-        # return icopy
 
