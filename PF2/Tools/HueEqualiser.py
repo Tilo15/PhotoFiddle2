@@ -102,7 +102,7 @@ class HueEqualiser(Tool.Tool):
 
 
 
-        return out
+        return image.image
 
 
     def _is_hue(self, image, hue_value, bleed_value = 3.5):

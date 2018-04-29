@@ -66,5 +66,5 @@ class BlackWhite(Tool.Tool):
 
             return out.astype(image.dtype)
         else:
-            return image
+            return image.image
 

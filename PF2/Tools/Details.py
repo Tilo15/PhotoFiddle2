@@ -126,7 +126,7 @@ class Details(Tool.Tool):
 
             im = out
 
-        return im
+        return image.image
 
 
     def _overlay(self, B, A, bpp, utype):

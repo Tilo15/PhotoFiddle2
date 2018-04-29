@@ -214,7 +214,7 @@ class Colours(Tool.Tool):
             out[out > np] = np
             return out.astype(im.dtype)
         else:
-            return image
+            return image.image
 
     def _is_highlight(self, image, bleed_value = 6.0):
         bleed = float(image.max() / bleed_value)

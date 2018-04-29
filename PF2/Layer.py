@@ -1,6 +1,7 @@
 from gi.repository import Gtk, GLib
 import PF2.VectorMask as VectorMask
 import cv2, numpy
+from PF2.Image import Image
 
 class Layer:
     def __init__(self, base, name, on_change):
@@ -114,6 +115,8 @@ class Layer:
                 # Layer is additive, make copy of current working image
                 layer = image.copy()
 
+            layerImage = Image(layer)
+
             # Process the Layer
             ntools = len(self.tools)
             count = 1
@@ -123,10 +126,11 @@ class Layer:
                     callback(tool.name, ntools, count - 1)
 
                 # Call the tool's image processing function
-                layer = tool.on_update(layer)
-                assert type(layer) == numpy.ndarray
+                layerImage.image = tool.on_update(layerImage)
+                assert type(layerImage.image) == cv2.UMat or type(layerImage.image) == numpy.ndarray
                 count += 1
 
+            layer = layerImage.get()
 
             # Base layer needs no mask processing
             if(not self.editable):

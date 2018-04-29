@@ -2,6 +2,7 @@ import numpy
 import cv2
 from PF2.Scalar import Scalar
 from PF2.Utilities import HMS
+from PF2.Utilities import clip
 import Tool
 
 
@@ -31,7 +32,7 @@ class Contrast(Tool.Tool):
             Tool.Property("shadow_bleed", "Shadow Bleed", "Slider", 0.5, max=1, min=0.001),
         ]
 
-    def on_update(self, im):
+    def on_update(self, image):
         # Apply Contrast Stuff
         if(not self.is_default()):
             ob = self.props["overall_brightness"].get_value()
@@ -62,14 +63,8 @@ class Contrast(Tool.Tool):
             mc -= oc
             sc -= oc
 
-
-            # Bits per pixel
-            bpp = float(str(im.dtype).replace("uint", "").replace("float", ""))
-            # Pixel value range
-            np = float(2 ** bpp - 1)
-
-            out = cv2.UMat(im.astype("float32"))
-
+            out = image.image
+            np = image.np
 
             # Histogram Stretch
             if(rs != 0 or ls != 0):
@@ -82,9 +77,6 @@ class Contrast(Tool.Tool):
                 out = cv2.subtract(out, Scalar(minpxv))
                 out = cv2.multiply(out, Scalar(np/float(maxpxv)))
                 
-                
-            
-
 
             # Highlights
 
@@ -193,13 +185,11 @@ class Contrast(Tool.Tool):
                 out = cv2.add(out, calc)
 
 
-            out = out.get()
+            return clip(out, np, 0, np)
 
-            # Clip any values out of bounds
-            out[out < 0.0] = 0.0
-            out[out > np] = np
-            return out.astype(im.dtype)
+            
         else:
-            return im
+            cv2.imshow("Display window", image.image)
+            return image.image
 
 

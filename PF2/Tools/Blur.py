@@ -42,7 +42,7 @@ class Blur(Tool.Tool):
 
                 elif(method == 2):
                     im = cv2.medianBlur(im, int(blur_size))
-        return im
+        return image.image
 
 
 
