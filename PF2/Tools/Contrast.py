@@ -67,7 +67,7 @@ class Contrast(Tool.Tool):
             # Pixel value range
             np = float(2 ** bpp - 1)
 
-            out = cv2.UMat(im)
+            out = cv2.UMat(im.astype("float32"))
 
 
             # Histogram Stretch
@@ -90,6 +90,9 @@ class Contrast(Tool.Tool):
             isHr = self._is_highlight(out, (3.0 / hbl), np)
             if (hc != 0.0):
                 # Highlight Contrast
+                #out = (((hn * ((hc * isHr) + np)) / (np * (hn - (hc * isHr)))) * (out - np / 2.0) + np / 2.0)
+                # The following is based on the above formula
+
                 hn = np + 4
                 hc = (hc / 100.0) * np + 0.8
 
@@ -106,50 +109,87 @@ class Contrast(Tool.Tool):
 
                 out = cv2.multiply(left, right)
                 out = cv2.add(out, Scalar(np / 2.0))
-
-
-                #out = (((hn * ((hc * isHr) + np)) / (np * (hn - (hc * isHr)))) * (out - np / 2.0) + np / 2.0)
-
-
-
-
+                
+                res, out = cv2.threshold(out, np, np, cv2.THRESH_TRUNC)
 
 
             if (hb != 0.0):
-                print(hb)
                 # Highlight Brightness
-                calc = cv2.multiply(isHr, Scalar(hb), dtype=cv2.CV_64F)
-                calc = cv2.divide(calc, Scalar(100.0))
-                calc = cv2.multiply(calc, Scalar(np))
-                out = cv2.add(out, calc, dtype=cv2.CV_64F)
-
                 #out = (out + ((hb * isHr) / 100.0) * np)
+                # The following is based on the above formula
+                calc = cv2.multiply(isHr, Scalar(np))
+                calc = cv2.multiply(calc, Scalar(hb/100.0))
+                out = cv2.add(out, calc)
 
-            # # Midtones
+            # Midtones
 
-            # isMr = self._is_midtone(out, (3.0 / mbl))
-            # if (mc != 0.0):
-            #     # Midtone Contrast
-            #     hn = np + 4
-            #     mc = (mc / 100.0) * np + 0.8
-            #     out = (((hn * ((mc * isMr) + np)) / (np * (hn - (mc * isMr)))) * (out - np / 2.0) + np / 2.0)
 
-            # if (mb != 0.0):
-            #     # Midtone Brightness
-            #     out = (out + ((mb * isMr) / 100.0) * np)
+            #isMt = self._is_midtone(out, (3.0 / mbl), np)
+            if (mc != 0.0):
+                # Midtone Contrast
+                #out = (((hn * ((hc * isHr) + np)) / (np * (hn - (hc * isHr)))) * (out - np / 2.0) + np / 2.0)
+                # The following is based on the above formula
 
-            # # Shadows
+                hn = np + 4
+                hc = (mc / 100.0) * np + 0.8
 
-            # isSr = self._is_shadow(out, (3.0 / sbl))
-            # if (sc != 0.0):
-            #     # Shadow Contrast
-            #     hn = np + 4
-            #     sc = (sc / 100.0) * np + 0.8
-            #     out = (((hn * ((sc * isSr) + np)) / (np * (hn - (sc * isSr)))) * (out - np / 2.0) + np / 2.0)
+                hc_x_isMt = cv2.multiply(isMt, Scalar(hc))
+                numerator = cv2.add(hc_x_isMt, Scalar(np))
+                numerator = cv2.multiply(numerator, Scalar(hn))
+            
+                denominator = cv2.subtract(Scalar(hn), hc_x_isMt)
+                denominator = cv2.multiply(denominator, Scalar(np))
 
-            # if (sb != 0.0):
-            #     # Shadow Brightness
-            #     out = (out + ((sb * isSr) / 100.0) * np)
+                left = cv2.divide(numerator, denominator)
+
+                right = cv2.subtract(out, Scalar(np / 2.0))                
+
+                out = cv2.multiply(left, right)
+                out = cv2.add(out, Scalar(np / 2.0))
+
+
+            if (mb != 0.0):
+                # Midtone Brightness
+                #out = (out + ((hb * isHr) / 100.0) * np)
+                # The following is based on the above formula
+                calc = cv2.multiply(isMt, Scalar(np))
+                calc = cv2.multiply(calc, Scalar(mb/100.0))
+                out = cv2.add(out, calc)
+
+            # Shadows
+
+
+            isSh = self._is_shadow(out, (3.0 / sbl), np)
+            if (sc != 0.0):
+                # Shadow Contrast
+                #out = (((hn * ((hc * isHr) + np)) / (np * (hn - (hc * isHr)))) * (out - np / 2.0) + np / 2.0)
+                # The following is based on the above formula
+
+                hn = np + 4
+                hc = (sc / 100.0) * np + 0.8
+
+                hc_x_isSh = cv2.multiply(isSh, Scalar(hc))
+                numerator = cv2.add(hc_x_isSh, Scalar(np))
+                numerator = cv2.multiply(numerator, Scalar(hn))
+            
+                denominator = cv2.subtract(Scalar(hn), hc_x_isSh)
+                denominator = cv2.multiply(denominator, Scalar(np))
+
+                left = cv2.divide(numerator, denominator)
+
+                right = cv2.subtract(out, Scalar(np / 2.0))                
+
+                out = cv2.multiply(left, right)
+                out = cv2.add(out, Scalar(np / 2.0))
+
+
+            if (sb != 0.0):
+                # Shadow Brightness
+                #out = (out + ((hb * isHr) / 100.0) * np)
+                # The following is based on the above formula
+                calc = cv2.multiply(isSh, Scalar(np))
+                calc = cv2.multiply(calc, Scalar(sb/100.0))
+                out = cv2.add(out, calc)
 
 
             out = out.get()
@@ -165,68 +205,27 @@ class Contrast(Tool.Tool):
     def _is_highlight(self, image, bleed_value = 6.0, np=255):
         bleed = float(np / bleed_value)
         mif = np / 3.0 * 2.0
-    
-        # icopy = cv2.add(image, Scalar(0), dtype=cv2.CV_64F)
-        # bleed_mask = cv2.inRange(icopy, Scalar(mif - bleed), Scalar(mif))
-        # bleed_mask = cv2.bitwise_not(icopy, mask=bleed_mask)
-
-
-        # #cv2.normalize(bleed_mask, bleed_mask, alpha=0, beta=np, norm_type=cv2.NORM_MINMAX)
-        # bleed_mask = cv2.subtract(Scalar(mif), bleed_mask, dtype=cv2.CV_64F)
-        # bleed_mask = cv2.divide(bleed_mask, Scalar(bleed))
-        # #bleed_mask = cv2.multiply(bleed_mask, Scalar(-1))
-        # #bleed_mask = cv2.add(bleed_mask, Scalar(1))
-        # cv2.normalize(bleed_mask, bleed_mask, alpha=0, beta=np, norm_type=cv2.NORM_MINMAX)
-        # ret, highlight_mask = cv2.threshold(icopy, mif, np, cv2.THRESH_BINARY)
-
-        # mask = cv2.bitwise_or(bleed_mask, highlight_mask)
-        # cv2.normalize(mask, mask, alpha=0.0, beta=1.0, norm_type=cv2.NORM_MINMAX)
-
-        # cv2.imshow("Display window",mask)
-        # # icopy = cv2.add(image, Scalar(0), dtype=cv2.CV_64F)
-
-        # # ret, icopy = cv2.threshold(icopy, mif - bleed, np, cv2.THRESH_TOZERO)
-        # # icopy = cv2.subtract(Scalar(mif), icopy)
-        # # icopy = cv2.divide(icopy, Scalar(bleed))
-        # # icopy = cv2.multiply(icopy, Scalar(-1))
-        # # icopy = cv2.add(icopy, Scalar(1))
-        # # ret, icopy = cv2.threshold(icopy, mif, 1.0, cv2.THRESH_TOZERO_INV)
-
-
-
-        # NEW
-
-        # Make everything below (mif - bleed) = 0
-        icopy = cv2.add(image, Scalar(0), dtype=cv2.CV_32F)
-        ret, icopy = cv2.threshold(icopy, mif - bleed, np, cv2.THRESH_TOZERO)
-
-        bld = cv2.subtract(Scalar(mif), icopy)
-        bld = cv2.divide(bld, Scalar(bleed))
-        bld = cv2.multiply(bld, Scalar(-1))
-        bld = cv2.add(bld, Scalar(1))
-
-        #res, bleed_mask = cv2.threshold(icopy, mif, np, cv2.THRESH_BINARY_INV)
-        res, bleed_mask = cv2.threshold(icopy, 0.0, np, cv2.THRESH_BINARY)
-        #bleed_mask = cv2.bitwise_and(bleed_mask, not_zero_mask)
-
-        bleed_mask = cv2.cvtColor(bleed_mask, cv2.COLOR_BGR2GRAY)
-        bleed_mask = cv2.inRange(bleed_mask, 0.1, np)
-        cv2.normalize(bleed_mask, bleed_mask, 0, 255, cv2.NORM_MINMAX,cv2.CV_8U)
-
-
-
-        icopy = cv2.bitwise_not(icopy, mask=bleed_mask)
-        icopy = cv2.add(icopy, bld, mask=bleed_mask)
-
-        cv2.imshow("Display window", icopy)
-
-        return icopy
-
 
         #icopy[icopy < mif - bleed] = 0.0
         #icopy[(icopy < mif) * (icopy != 0.0)] = ((mif - (icopy[(icopy < mif) * (icopy != 0.0)])) / bleed) * -1 + 1
         #icopy[icopy >= mif] = 1.0
         #return icopy
+        # The following is based upon the above old procedure
+
+        # Make everything below (mif - bleed) = 0
+        icopy = cv2.add(image, Scalar(0), dtype=cv2.CV_32F)
+        ret, icopy = cv2.threshold(icopy, mif - bleed, np, cv2.THRESH_TOZERO)
+
+        # Calculate bleed
+        bld = cv2.subtract(Scalar(mif), icopy)
+        bld = cv2.divide(bld, Scalar(bleed))
+        bld = cv2.multiply(bld, Scalar(-1))
+        bld = cv2.add(bld, Scalar(1))
+        res, bld = cv2.threshold(bld, 0.0, 1.0, cv2.THRESH_TOZERO)
+
+        return bld
+
+
 
     def _is_midtone(self, image, bleed_value = 6.0):
         bleed = float(image.max() / bleed_value)
@@ -242,13 +241,39 @@ class Contrast(Tool.Tool):
         icopy[(icopy >= mif) * (icopy <= mir)] = 1.0
         return icopy
 
-    def _is_shadow(self, image, bleed_value=6.0):
-        bleed = float(image.max() / bleed_value)
-        mir = image.max() / 3.0
-        icopy = image.copy()
+    def _is_shadow(self, image, bleed_value=6.0, np=255):
+        inv = cv2.multiply(image, Scalar(-1))
+        inv = cv2.add(inv, Scalar(np))
+        return self._is_highlight(inv, bleed_value,)
 
-        icopy[icopy <= mir] = 1.0
-        icopy[icopy > mir + bleed] = 0.0
-        icopy[icopy > mir] = (((icopy[(icopy > mir) * (icopy != 0.0)]) - mir) / bleed) * -1 + 1
-        return icopy
+
+        bleed = float(np / bleed_value)
+        mir = np / 3.0
+
+        icopy = cv2.add(image, Scalar(0), dtype=cv2.CV_32F)
+
+        # Make everything below mir = 1
+        # ret, shadow_mask = cv2.threshold(icopy, mir, np, cv2.THRESH_BINARY_INV)
+        # icopy = cv2.bitwise_and(icopy, shadow_mask)
+    
+        # Make everything above (mir + bleed) = 0
+        #ret, icopy = cv2.threshold(icopy, mir + bleed, np, cv2.THRESH_TOZERO_INV)
+
+        # Calculate bleed
+        bld = cv2.subtract(icopy, Scalar(mir))
+        bld = cv2.divide(bld, Scalar(bleed))
+        bld = cv2.multiply(bld, Scalar(-1))
+        bld = cv2.add(bld, Scalar(1))
+        res, bld = cv2.threshold(bld, 1.0, np, cv2.THRESH_TRUNC)
+
+        print(bld.get().max(), bld.get().min())
+        cv2.imshow("Display window", bld)
+        cv2.imshow("Display thresh", icopy)
+
+        return bld
+
+        # icopy[icopy <= mir] = 1.0
+        # icopy[icopy > mir + bleed] = 0.0
+        #icopy[icopy > mir] = (((icopy[(icopy > mir) * (icopy != 0.0)]) - mir) / bleed) * -1 + 1
+        # return icopy
 
