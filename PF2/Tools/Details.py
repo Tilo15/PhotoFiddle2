@@ -3,6 +3,9 @@ import numpy
 
 import Tool
 from PF2.Tools import Contrast
+from PF2.Utilities import Blending
+from PF2.Utilities import invert
+from PF2.Scalar import Scalar
 
 
 class Details(Tool.Tool):
@@ -33,7 +36,7 @@ class Details(Tool.Tool):
         self.contrast_tool_restore = Contrast.Contrast()
 
     def on_update(self, image):
-        im = image
+        im = image.image
         if(self.props["d_enabled"].get_value()):
             strength = self.props["d_strength"].get_value()
             detail = self.props["d_detail"].get_value()
@@ -49,17 +52,15 @@ class Details(Tool.Tool):
             gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
 
             # Invert
-            edged = gray.max() - gray
+            edged = invert(gray, image.np)
 
             # Apply Brightness and Contrast
-            edged = self.contrast_tool.on_update(edged)
-
-            edged = cv2.UMat(edged)
+            image.image = edged
+            edged = self.contrast_tool.on_update(image)
 
             # Blur
             if(detail > 0):
-                height, width = image.shape[:2]
-                size = (height * width)
+                size = (image.height * image.width)
                 mul = numpy.math.sqrt(size) / 1064.416
 
                 blur_size = 2 * round((round(detail*mul) + 1) / 2) - 1
@@ -70,35 +71,33 @@ class Details(Tool.Tool):
 
             # Overlay
             colour = cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR)
-            bpp = int(str(im.dtype).replace("uint", "").replace("float", ""))
-            blended = self._overlay(colour.get(), im, float((2 ** bpp) - 1), im.dtype)
+            blended = Blending.overlay(im, colour, image.np)
 
             # Restore Contrast
             self.contrast_tool_restore.props["highlight_contrast"].set_value(pcont * 0.25)
             self.contrast_tool_restore.props["midtone_contrast"].set_value(pcont * 0.5)
             self.contrast_tool_restore.props["shadow_contrast"].set_value(pcont * 0.25)
-            cfixed = self.contrast_tool_restore.on_update(blended)
+            image.image = blended
+            cfixed = self.contrast_tool_restore.on_update(image)
 
             # Blend
             if(strength != 100):
-                im = cv2.addWeighted(cfixed, (strength/100), image, 1 - (strength/100), 0).astype(image.dtype)
+                im = cv2.addWeighted(cfixed, (strength/100), im, 1 - (strength/100), 0)
             else:
-                im = cfixed.astype(image.dtype)
+                im = cfixed
 
 
         if(self.props["e_enabled"].get_value()):
             strength = self.props["e_strength"].get_value()
             t1 = self.props["e_fthresh"].get_value()
             t2 = self.props["e_sthresh"].get_value()
-
-            # Get bits per pixel
-            bpp = int(str(im.dtype).replace("uint", "").replace("float", ""))
-
+            # TODO
             # Convert to 8 Bit
-            eight = ((im / float(2 ** bpp)) * 255).astype(numpy.uint8)
+            # eight = cv2.
+            # eight = cv2.add(Scalar(0), im, dtype=)
 
             # Make Grayscale
-            grey = cv2.cvtColor(eight, cv2.COLOR_BGR2GRAY)
+            grey = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
 
             # Find edges
             edged = cv2.Canny(grey, t1, t2)
@@ -126,7 +125,7 @@ class Details(Tool.Tool):
 
             im = out
 
-        return image.image
+        return im
 
 
     def _overlay(self, B, A, bpp, utype):

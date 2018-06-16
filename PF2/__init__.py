@@ -279,7 +279,7 @@ class PF2(Activity.Activity):
 
     def on_open(self, path):
         # TODO remove
-        cv2.namedWindow( "Display window", cv2.WINDOW_AUTOSIZE );
+        #cv2.namedWindow( "Display window", cv2.WINDOW_AUTOSIZE );
         self.root.get_titlebar().set_subtitle("Raster Editor")
         if(path != None):
             # We have been sent here from another

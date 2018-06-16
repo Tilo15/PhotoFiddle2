@@ -189,7 +189,6 @@ class Contrast(Tool.Tool):
 
             
         else:
-            cv2.imshow("Display window", image.image)
             return image.image
 
 
