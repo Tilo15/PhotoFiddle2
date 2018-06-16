@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Generated with glade 3.20.0 -->
+<!-- Generated with glade 3.20.4 -->
 <interface>
   <requires lib="gtk+" version="3.20"/>
   <object class="GtkHeaderBar" id="PF2_bulk_open_header">
@@ -78,6 +78,9 @@
         </child>
       </object>
     </child>
+    <child type="titlebar">
+      <placeholder/>
+    </child>
   </object>
   <object class="GtkWindow" id="PF2_open_window">
     <property name="width_request">700</property>
@@ -92,6 +95,9 @@
         <property name="can_focus">False</property>
         <property name="filter">PF2_filefilter</property>
       </object>
+    </child>
+    <child type="titlebar">
+      <placeholder/>
     </child>
   </object>
   <object class="GtkAdjustment" id="PF2_layer_opacity">
@@ -118,39 +124,241 @@
     <property name="can_focus">False</property>
     <property name="margin_top">1</property>
     <child>
-      <object class="GtkScrolledWindow" id="PF2_scroll_window">
+      <object class="GtkStack" id="PF2_preview_stack">
         <property name="width_request">500</property>
         <property name="height_request">500</property>
         <property name="visible">True</property>
-        <property name="can_focus">True</property>
-        <property name="margin_left">18</property>
-        <property name="margin_right">18</property>
-        <property name="margin_top">18</property>
-        <property name="margin_bottom">18</property>
-        <property name="hexpand">True</property>
-        <property name="vexpand">True</property>
-        <property name="shadow_type">in</property>
+        <property name="can_focus">False</property>
+        <property name="transition_type">crossfade</property>
         <child>
-          <object class="GtkViewport" id="PF2_viewport">
+          <object class="GtkScrolledWindow" id="PF2_scroll_window">
+            <property name="width_request">500</property>
+            <property name="height_request">500</property>
             <property name="visible">True</property>
-            <property name="can_focus">False</property>
+            <property name="can_focus">True</property>
+            <property name="margin_left">18</property>
+            <property name="margin_right">18</property>
+            <property name="margin_top">18</property>
+            <property name="margin_bottom">18</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <property name="shadow_type">in</property>
             <child>
-              <object class="GtkEventBox" id="PF2_preview_eventbox">
+              <object class="GtkViewport" id="PF2_viewport">
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
-                <property name="above_child">True</property>
                 <child>
-                  <object class="GtkImage" id="PF2_preview">
+                  <object class="GtkEventBox" id="PF2_preview_eventbox">
                     <property name="visible">True</property>
                     <property name="can_focus">False</property>
-                    <property name="halign">center</property>
-                    <property name="valign">center</property>
-                    <property name="pixbuf">logo.png</property>
+                    <property name="above_child">True</property>
+                    <child>
+                      <object class="GtkImage" id="PF2_preview">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="halign">center</property>
+                        <property name="valign">center</property>
+                        <property name="pixbuf">logo.png</property>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>
             </child>
           </object>
+          <packing>
+            <property name="name">preview</property>
+            <property name="title" translatable="yes">page0</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkBox" id="PF_preview_resize">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkSpinner">
+                <property name="width_request">64</property>
+                <property name="height_request">64</property>
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="active">True</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="label" translatable="yes">Resizing Preview…</property>
+                <attributes>
+                  <attribute name="scale" value="1.5"/>
+                </attributes>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkProgressBar" id="PF2_resize_progress">
+                <property name="width_request">400</property>
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="margin_top">8</property>
+                <property name="text" translatable="yes">Getting ready to render</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">2</property>
+              </packing>
+            </child>
+          </object>
+          <packing>
+            <property name="name">resize</property>
+            <property name="title" translatable="yes">page1</property>
+            <property name="position">1</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkBox" id="PF_load_image">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkSpinner">
+                <property name="width_request">64</property>
+                <property name="height_request">64</property>
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="active">True</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="label" translatable="yes">Loading Photo…</property>
+                <attributes>
+                  <attribute name="scale" value="1.5"/>
+                </attributes>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="margin_top">8</property>
+                <property name="label" translatable="yes">Please wait while PhotoFiddle loads your photo</property>
+                <attributes>
+                  <attribute name="scale" value="1"/>
+                </attributes>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">2</property>
+              </packing>
+            </child>
+          </object>
+          <packing>
+            <property name="name">load</property>
+            <property name="title" translatable="yes">page0</property>
+            <property name="position">2</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkBox" id="PF_export_image_progress">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkSpinner">
+                <property name="width_request">64</property>
+                <property name="height_request">64</property>
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="active">True</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="label" translatable="yes">Exporting Photo…</property>
+                <attributes>
+                  <attribute name="scale" value="1.5"/>
+                </attributes>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel" id="PF2_export_progress_label">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="margin_top">8</property>
+                <property name="label" translatable="yes">Getting ready to render</property>
+                <attributes>
+                  <attribute name="scale" value="1"/>
+                </attributes>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">2</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkProgressBar" id="PF2_export_progress">
+                <property name="width_request">400</property>
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="margin_top">8</property>
+                <property name="text" translatable="yes">Getting ready to render</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">3</property>
+              </packing>
+            </child>
+          </object>
+          <packing>
+            <property name="name">export</property>
+            <property name="title" translatable="yes">page0</property>
+            <property name="position">3</property>
+          </packing>
         </child>
       </object>
       <packing>
@@ -172,9 +380,6 @@
           <object class="GtkBox">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
-            <child>
-              <placeholder/>
-            </child>
             <child>
               <object class="GtkSeparator">
                 <property name="visible">True</property>

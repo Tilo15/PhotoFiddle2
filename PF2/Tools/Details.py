@@ -62,7 +62,7 @@ class Details(Tool.Tool):
                 size = (height * width)
                 mul = numpy.math.sqrt(size) / 1064.416
 
-                blur_size = 2 * round((round(detail*mul) + 1) / 2) - 1
+                blur_size = abs(2 * round((round(detail*mul) + 1) / 2) - 1)
                 blurred = cv2.GaussianBlur(edged, (int(blur_size), int(blur_size)), 0)
             else:
                 blurred = edged

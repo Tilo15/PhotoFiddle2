@@ -145,7 +145,7 @@ class HueEqualiser(Tool.Tool):
 
             map = map*255
 
-            blur_size = 2 * round((round(strength * mul) + 1) / 2) - 1
+            blur_size = abs(2 * round((round(strength * mul) + 1) / 2) - 1)
             im = cv2.blur(map, (int(blur_size), int(blur_size)))
             return im/255.0
 
