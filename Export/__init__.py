@@ -4,11 +4,12 @@ import threading
 from gi.repository import GLib
 import cv2
 import subprocess
-
+from Export.exiftool import ExifTool
 
 class ExportDialog:
 
     def __init__(self, root, builder, w, h, get_image_call, done_call, path):
+        self.exif = ExifTool()
         self.path = path
         self.builder = builder
         self.root = root
@@ -38,7 +39,11 @@ class ExportDialog:
             "quality",
             "width_spin",
             "height_spin",
-            "quality_spin"
+            "quality_spin",
+            "metadata",
+            "description",
+            "artist",
+            "copyright"
         ]
 
         for component in components:
@@ -65,7 +70,26 @@ class ExportDialog:
         self.ui["cancel_button"].connect("clicked", self.on_cancel_clicked)
 
 
+        # Get EXIF data for this image ready
+        self.exif.start()  
+        data = self.exif.get_metadata(self.path)
+
+        # Preload editable fields
+        self.ui["description"].set_text(self.safe_exif_get(data, "EXIF:ImageDescription"))
+        self.ui["artist"].set_text(self.safe_exif_get(data, "EXIF:Artist"))
+        self.ui["copyright"].set_text(self.safe_exif_get(data, "EXIF:Copyright"))
+        
+        print(self.safe_exif_get(data, "Flash"))
+
+
         self.ui["window"].show_all()
+
+
+    def safe_exif_get(self, data, key):
+        out = ""
+        if(key in data):
+            out = data[key]
+        return out
 
 
     def on_preset_changed(self, sender):
@@ -118,6 +142,7 @@ class ExportDialog:
         self.ui["width_spin"].set_value(r*self.width)
 
     def on_cancel_clicked(self, sender):
+        self.exif.terminate()
         self.ui["window"].close()
 
     def on_save_clicked(self, sender):
@@ -128,10 +153,19 @@ class ExportDialog:
         height = self.ui["height"].get_value()
         path = self.ui["file"].get_filename()
         pngcrush = self.ui["pngcrush"].get_active()
+        # Metadata
+        metadata_scheme = self.ui["metadata"].get_active()
+        description = self.ui["description"].get_text()
+        artist = self.ui["artist"].get_text()
+        copyright_info = self.ui["copyright"].get_text()
+        
         threading.Thread(target=self.do_export, args=(format, quality, width,
-                                                      height, path, pngcrush)).start()
+                                                      height, path, pngcrush,
+                                                      metadata_scheme,
+                                                      description, artist,
+                                                      copyright_info)).start()
 
-    def do_export(self, format, quality, width, height, path, pngcrush):
+    def do_export(self, format, quality, width, height, path, pngcrush, metadata_scheme, description, artist, copyright_info):
         self.image = self.get_image_call(width, height)
         newPath = path
         if(format == 0) and (not path.endswith(".png")):
@@ -151,14 +185,39 @@ class ExportDialog:
             tempPath = "/tmp/pngcrush-%i.png" % random.randrange(1000000,9999999)
             cv2.imwrite(tempPath, self.image)
             subprocess.call(["pngcrush", "-rem gAMA", "-rem cHRM", "-rem iCCP", "-rem sRGB" , "-m 0", "-l 9", "-fix", "-v", "-v", tempPath, newPath])
+            os.unlink(tempPath)
 
         else:
             cv2.imwrite(newPath, self.image)
 
+        # Write metadata
+        # If the scheme is Include Original Metadata
+        if(metadata_scheme == 0):
+            # Copy metadata from original file
+            self.exif.execute(b"-TagsFromFile", self.path.encode("utf-8"), b"-all:all", newPath.encode("utf-8"), b"-overwrite_original")
+
+        # Scheme 1 (Ignore Original Metadata) does not copy any data so is skipped here
+
+        # If the scheme is Strip GPS Information
+        if(metadata_scheme == 2):
+            # Copy all metadata not pertaining to GPS information
+            self.exif.execute(b"-tagsFromFile", self.path.encode("utf-8"), b"-all:all", b"-gps:all=", b"-xmp:geotag=", newPath.encode("utf-8"), b"-overwrite_original")
+
+        # Write dialog editable metadata and application metadata to file
+        self.exif.execute(self.fmt_exif_set(description, b"ImageDescription"),
+                            self.fmt_exif_set(artist, b"Artist"),
+                            self.fmt_exif_set(copyright_info, b"Copyright"),
+                            self.fmt_exif_set("PhotoFiddle2", b"Software"),
+                            newPath.encode("utf-8"), b"-overwrite_original")
+
+        # Clean up
+        self.exif.terminate()
+
         GLib.idle_add(self.done_call, newPath)
 
 
-
+    def fmt_exif_set(self, data, key):
+        return b"-%s=%s" % (key, data.encode("utf-8"))
 
 
 

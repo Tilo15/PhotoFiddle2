@@ -11,7 +11,7 @@ import os
 import traceback
 import uuid
 
-from PF2 import Histogram, Layer, Debounce
+from PF2 import Histogram, Layer, Debounce, Sounds
 from PF2.Tools import BlackWhite
 from PF2.Tools import Colours
 from PF2.Tools import Contrast
@@ -87,7 +87,10 @@ class PF2(Activity.Activity):
             "preview_stack",
             "export_progress",
             "export_progress_label",
-            "resize_progress"
+            "resize_progress",
+            "export_complete_back",
+            "export_again",
+            "export_complete_label"
         ]
 
         for component in components:
@@ -194,6 +197,8 @@ class PF2(Activity.Activity):
         self.ui["scroll_window"].connect_after('motion-notify-event', self.mouse_coords_changed)
         self.ui["mask_brush_size"].connect("value-changed", self.brush_size_changed)
         self.ui["layer_blend_mode"].connect("changed", self.layer_blend_mode_changed)
+        self.ui["export_complete_back"].connect("clicked", self.on_export_go_back)
+        self.ui["export_again"].connect("clicked", self.on_export_clicked)
 
 
 
@@ -322,6 +327,7 @@ class PF2(Activity.Activity):
 
     def show_current(self):
         self.ui["preview"].set_from_pixbuf(self.pimage)
+        Sounds.SystemSounds.window_attention()
         if (self.ui["original_toggle"].get_active()):
             self.ui["original_toggle"].set_active(False)
 
@@ -369,7 +375,11 @@ class PF2(Activity.Activity):
     def on_export_complete(self, filename):
         self.is_exporting = False
         self.on_export_state_change()
-        self.show_message("Export Complete!", "Your photo has been exported to '%s'" % filename)
+        Sounds.SystemSounds.complete()
+        self.ui["export_complete_label"].set_text("Saved to '%s'" % filename)
+        self.ui["preview_stack"].set_visible_child_name("export_complete")
+
+    def on_export_go_back(self, sender):
         self.ui["preview_stack"].set_visible_child_name("preview")
 
     def on_export_state_change(self):
@@ -493,8 +503,8 @@ class PF2(Activity.Activity):
             self.render_debounce.call(None, self.update_resize_progress)
 
     def update_resize_progress(self, name, count, current):
-        fraction = current+(self.current_processing_layer_index*count)
-        fraction = fraction / (count*(len(self.layers)-1))
+        fraction = current+((self.current_processing_layer_index+1)*count)
+        fraction = fraction / (count*(len(self.layers)))
 
         GLib.idle_add(self.ui["resize_progress"].set_fraction, fraction)
 
@@ -530,7 +540,7 @@ class PF2(Activity.Activity):
         self.is_working = False
         GLib.idle_add(self.update_undo_state)
         page_name = self.ui["preview_stack"].get_visible_child_name()
-        if(page_name != "render" and page_name != "load"):
+        if(page_name != "render" and page_name != "load" and page_name != "export_complete"):
             self.ui["preview_stack"].set_visible_child_name("preview")
 
         self.change_occurred = False
