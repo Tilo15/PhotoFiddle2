@@ -1,5 +1,8 @@
 import cv2
 import numpy
+from PF2.Scalar import Scalar
+from PF2.Utilities import HMS
+from PF2.Utilities import clip
 
 import Tool
 
@@ -26,45 +29,40 @@ class BlackWhite(Tool.Tool):
         if(self.props["enabled"].get_value()):
             mode = self.props["method"].get_value()
 
-            bpp = float(str(image.dtype).replace("uint", "").replace("float", ""))
-            np = float(2 ** bpp - 1)
-            out = image.astype(numpy.float32)
+            np = image.np
+            out = image.image
+            channels = cv2.split(out)
 
             if(mode == 0):
-                bc = out[0:, 0:, 0]
-                gc = out[0:, 0:, 1]
-                rc = out[0:, 0:, 2]
-
-                out = (bc + gc + rc) / 3
+                out = self._weighted(channels)
 
             elif(mode == 1):
-                bc = out[0:, 0:, 0]
-                gc = out[0:, 0:, 1]
-                rc = out[0:, 0:, 2]
-
-                out = 0.114 * bc + 0.587 * gc + 0.299 * rc
+                out = self._weighted(channels, 0.114, 0.587, 0.299)
 
             elif(mode == 2):
-                hsl = cv2.cvtColor(out, cv2.COLOR_BGR2HSV)
-                out = hsl[0:, 0:, 2]
+                hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV)
+                hsv_chans = cv2.split(hsv)
+                out = hsv_chans[2]
 
             elif(mode == 3):
                 r = self.props["red"].get_value()
                 g = self.props["green"].get_value()
                 b = self.props["blue"].get_value()
 
-                bc = out[0:, 0:, 0]
-                gc = out[0:, 0:, 1]
-                rc = out[0:, 0:, 2]
+                out = self._weighted(channels, b, g, r)
 
-                out = b * bc + g * gc + r * rc
+            out = clip(out, np, 0, np)
 
-            out[out < 0.0] = 0.0
-            out[out > np] = np
+            return cv2.cvtColor(out, cv2.COLOR_GRAY2BGR)
 
-            out = cv2.cvtColor(out, cv2.COLOR_GRAY2BGR)
-
-            return out.astype(image.dtype)
         else:
             return image.image
 
+    def _weighted(self, channels, b=0.333, g=0.333, r=0.333):
+        blue = cv2.multiply(channels[0], Scalar(b))
+        green = cv2.multiply(channels[1], Scalar(g))
+        red = cv2.multiply(channels[2], Scalar(r))
+
+        out = cv2.add(blue, green)
+        out = cv2.add(out, red)
+        return out
