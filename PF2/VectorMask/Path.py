@@ -44,6 +44,7 @@ class Path:
         self.draw_points(map, self.points, 255)
 
         if(self.brush_feather > 1):
+            # TODO, could nuber be negative?
             blur_size = 2 * round((round(self.brush_feather) + 1) / 2) - 1
             map = cv2.blur(map, (int(blur_size), int(blur_size)))
             map = map[:, :, numpy.newaxis]

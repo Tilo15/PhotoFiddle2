@@ -45,7 +45,8 @@ class Tonemap(Tool.Tool):
                     size = (image.height * image.width)
                     mul = numpy.math.sqrt(size) / 1064.416  # numpy.math.sqrt(1132982.0)
 
-                    blur_size = 2 * round((round((blur/10.0) * mul) + 1) / 2) - 1
+                    blur_size = abs(2 * round((round((blur/10.0) * mul) + 1) / 2) - 1)
+                    print(height, width, mul, blur_size)
                     blurred = cv2.GaussianBlur(inverted, (int(blur_size), int(blur_size)), 0)
                 else:
                     # Or, don't blur

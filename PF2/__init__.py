@@ -11,7 +11,7 @@ import os
 import traceback
 import uuid
 
-from PF2 import Histogram, Layer
+from PF2 import Histogram, Layer, Debounce, Sounds
 from PF2.Tools import BlackWhite
 from PF2.Tools import Colours
 from PF2.Tools import Contrast
@@ -83,7 +83,14 @@ class PF2(Activity.Activity):
             "layer_opacity",
             "layer_opacity_scale",
             "layer_blend_mode",
-            "viewport"
+            "viewport",
+            "preview_stack",
+            "export_progress",
+            "export_progress_label",
+            "resize_progress",
+            "export_complete_back",
+            "export_again",
+            "export_complete_label"
         ]
 
         for component in components:
@@ -115,7 +122,7 @@ class PF2(Activity.Activity):
         self.ui["original_toggle"].set_sensitive(False)
         self.ui["export_image"].set_sensitive(False)
 
-        # Setup editor variables
+        # Setup editor variaexport
         self.is_editing = False
         self.has_loaded = False
         self.image_path = ""
@@ -154,6 +161,8 @@ class PF2(Activity.Activity):
         self.current_processing_layer_name = "base"
         self.current_processing_layer_index = 0
         self.update_image_task_id = ""
+        self.resize_debounce = Debounce.Debouncer(self.resize_preview)
+        self.render_debounce = Debounce.Debouncer(self.update_image)
 
         # Setup Open Dialog
         self.ui["open_window"].set_transient_for(self.root)
@@ -188,6 +197,8 @@ class PF2(Activity.Activity):
         self.ui["scroll_window"].connect_after('motion-notify-event', self.mouse_coords_changed)
         self.ui["mask_brush_size"].connect("value-changed", self.brush_size_changed)
         self.ui["layer_blend_mode"].connect("changed", self.layer_blend_mode_changed)
+        self.ui["export_complete_back"].connect("clicked", self.on_export_go_back)
+        self.ui["export_again"].connect("clicked", self.on_export_clicked)
 
 
 
@@ -214,7 +225,9 @@ class PF2(Activity.Activity):
         else:
             self.image_path = path
 
-        self.show_message("Loading Photo…", "Please wait while PhotoFiddle loads your photo", True)
+        #self.show_message("Loading Photo…", "Please wait while PhotoFiddle loads your photo", True)
+        self.ui["preview_stack"].set_visible_child_name("load")
+
         self.root.get_titlebar().set_subtitle("%s…" % (self.image_path))
 
         # Delete all layers, except the base
@@ -260,9 +273,14 @@ class PF2(Activity.Activity):
             w = (self.ui["scroll_window"].get_allocated_width() - 12) * self.ui["zoom"].get_value()
             h = (self.ui["scroll_window"].get_allocated_height() - 12) * self.ui["zoom"].get_value()
             if(self.pheight != h) or (self.pwidth != w):
-                thread = threading.Thread(target=self.resize_preview,
-                                          args=(w, h))
-                thread.start()
+                print("Resize to w%i h%i" % (w, h))
+                # Don't dismiss the render progress or load progress
+                page_name = self.ui["preview_stack"].get_visible_child_name()
+                if(page_name != "render"):
+                    self.ui["preview_stack"].set_visible_child_name("resize")
+                # Reset the resize progress
+                self.ui["resize_progress"].set_fraction(0.0)
+                self.resize_debounce.call(w, h)
 
     def on_preview_toggled(self, sender):
         if(sender.get_active()):
@@ -311,6 +329,7 @@ class PF2(Activity.Activity):
 
     def show_current(self):
         self.ui["preview"].set_from_pixbuf(self.pimage)
+        Sounds.SystemSounds.window_attention()
         if (self.ui["original_toggle"].get_active()):
             self.ui["original_toggle"].set_active(False)
 
@@ -318,12 +337,9 @@ class PF2(Activity.Activity):
     def on_layer_change(self, layer):
         print(layer, "changed")
         if(self.has_loaded):
-            if(not self.change_occurred):
-                self.change_occurred = True
-                thread = threading.Thread(target=self.update_image, args=(False, layer))
-                thread.start()
-            else:
-                self.additional_change_occurred = True
+            # TODO this could be problematic if someone somehow rapidly
+            # switches from editing one layer to another
+            self.render_debounce.call(layer)
 
     def on_layer_mask_change(self, layer):
         if(self.has_loaded):
@@ -344,21 +360,11 @@ class PF2(Activity.Activity):
 
     def on_lower_peak_toggled(self, sender):
         self.lower_peak_on = sender.get_active()
-        if (self.lower_peak_on):
-            thread = threading.Thread(target=self.process_peaks, args=(True,))
-            thread.start()
-        else:
-            thread = threading.Thread(target=self.update_image, args=(True,))
-            thread.start()
+        self.update_image()
 
     def on_upper_peak_toggled(self, sender):
         self.upper_peak_on = sender.get_active()
-        if (self.lower_peak_on):
-            thread = threading.Thread(target=self.process_peaks, args=(True,))
-            thread.start()
-        else:
-            thread = threading.Thread(target=self.update_image, args=(True,))
-            thread.start()
+        self.update_image()
 
     def image_opened(self): 
         self.root.get_titlebar().set_subtitle("%s (%s Bit)" % (self.image_path, self.bit_depth))
@@ -371,7 +377,12 @@ class PF2(Activity.Activity):
     def on_export_complete(self, filename):
         self.is_exporting = False
         self.on_export_state_change()
-        self.show_message("Export Complete!", "Your photo has been exported to '%s'" % filename)
+        Sounds.SystemSounds.complete()
+        self.ui["export_complete_label"].set_text("Saved to '%s'" % filename)
+        self.ui["preview_stack"].set_visible_child_name("export_complete")
+
+    def on_export_go_back(self, sender):
+        self.ui["preview_stack"].set_visible_child_name("preview")
 
     def on_export_state_change(self):
         self.ui["control_reveal"].set_sensitive(not self.is_exporting)
@@ -381,6 +392,9 @@ class PF2(Activity.Activity):
     def on_export_started(self):
         self.is_exporting = True
         self.on_export_state_change()
+        self.ui["preview_stack"].set_visible_child_name("export")
+        self.ui["export_progress"].set_fraction(0.0)
+        self.ui["export_progress_label"].set_text("Getting ready to render")
 
     def update_undo_state(self):
         self.ui["undo"].set_sensitive((self.undo_position > 0) and (not self.is_working))
@@ -465,13 +479,6 @@ class PF2(Activity.Activity):
             nh = height * ratio
 
 
-            # Do quick ui resize
-            # if(self.image != None):
-            #     # If we have an edited version, show that
-            #     image = cv2.resize(self.image, (int(nw), int(nh)), interpolation=cv2.INTER_NEAREST)
-            #     self.pimage = self.pimage = self.create_pixbuf(image)
-            #     GLib.idle_add(self.show_current)
-
             if(type(self.pimage) == numpy.ndarray and not self.is_scaling):
                 self.is_scaling = True
                 # If we have an edited version, show that
@@ -495,53 +502,51 @@ class PF2(Activity.Activity):
             self.image = self.original_image.copy()
 
             # Update image
-            if (not self.change_occurred):
-                self.change_occurred = True
-                self.update_image()
-            else:
-                self.additional_change_occurred = True
+            self.render_debounce.call(None, self.update_resize_progress)
+
+    def update_resize_progress(self, name, count, current):
+        fraction = current+((self.current_processing_layer_index+1)*count)
+        fraction = fraction / (count*(len(self.layers)))
+
+        GLib.idle_add(self.ui["resize_progress"].set_fraction, fraction)
 
 
 
-    def update_image(self, immediate=False, changed_layer=None):
-        if(not immediate):
-            time.sleep(0.5)
-        self.additional_change_occurred = False
+    def update_image(self, changed_layer=None, callback=None):
         self.is_working = True
         GLib.idle_add(self.update_undo_state)
         GLib.idle_add(self.start_work)
         image = numpy.copy(self.original_image)
         rst = time.time()
-        task_id = uuid.uuid4()
-        self.update_image_task_id = task_id
-        image = self.run_stack(image, changed_layer=changed_layer)
-        if(task_id == self.update_image_task_id):
-            self.image = image
-            if(type(self.image) != numpy.ndarray):
-                GLib.idle_add(self.stop_work)
-                self.is_working = False
-                self.change_occurred = False
-                GLib.idle_add(self.update_undo_state)
-                print("self.image == None")
-                GLib.idle_add(self.show_message, "Image Render Failed…",
-                              "PhotoFiddle encountered an internal error and was unable to render the image… Please try again.")
-                raise Exception()
+        image = self.run_stack(image, callback=callback, changed_layer=changed_layer)
+        self.image = image
+        if(type(self.image) != numpy.ndarray):
+            GLib.idle_add(self.stop_work)
+            self.is_working = False
+            self.change_occurred = False
+            GLib.idle_add(self.update_undo_state)
+            print("self.image == %s" % type(self.image))
+            #GLib.idle_add(self.show_message, "Image Render Failed…",
+            #              "PhotoFiddle encountered an internal error and was unable to render the image… Please try again.")
+            raise Exception()
 
-            self.process_mask()
-            self.image_is_dirty = False
-            if(self.additional_change_occurred):
-                self.update_image()
-            else:
-                self.save_image_data()
-                threading.Thread(target=self.draw_hist, args=(self.image,)).start()
+        self.process_mask()
+        self.image_is_dirty = False
 
-                self.process_peaks()
-                self.update_preview()
-                GLib.idle_add(self.stop_work)
-                self.is_working = False
-                GLib.idle_add(self.update_undo_state)
-                self.change_occurred = False
-                self.undoing = False
+        self.save_image_data()
+        threading.Thread(target=self.draw_hist, args=(self.image,)).start()
+
+        self.process_peaks()
+        self.update_preview()
+        GLib.idle_add(self.stop_work)
+        self.is_working = False
+        GLib.idle_add(self.update_undo_state)
+        page_name = self.ui["preview_stack"].get_visible_child_name()
+        if(page_name != "render" and page_name != "load" and page_name != "export_complete"):
+            self.ui["preview_stack"].set_visible_child_name("preview")
+
+        self.change_occurred = False
+        self.undoing = False
 
 
 
@@ -699,6 +704,8 @@ class PF2(Activity.Activity):
 
                     self.undo_stack = [data,]
                     self.undo_position = 0
+                    # Wait the timeout of the debouncer to prevent double rendering
+                    time.sleep(self.render_debounce.interval)
                     loadDefaults = False
             except:
                 GLib.idle_add(self.show_message,"Unable to load previous edits…",
@@ -749,22 +756,24 @@ class PF2(Activity.Activity):
 
     def get_export_image(self, w, h):
         GLib.idle_add(self.on_export_started)
-        GLib.idle_add(self.show_message, "Exporting Photo", "Please wait…", True, True)
         img = cv2.imread(self.image_path, 2 | 1)
         img = cv2.resize(img, (int(w), int(h)), interpolation=cv2.INTER_AREA)
         img = self.run_stack(img, self.export_progress_callback)
-        GLib.idle_add(self.show_message, "Exporting Photo", "Saving to filesystem…", True, True)
-        GLib.idle_add(self.update_message_progress, 1, 1)
+        GLib.idle_add(self.ui["export_progress_label"].set_text, "Saving to filesystem")
+        GLib.idle_add(self.ui["export_progress"].set_fraction, 1.0)
         return img
 
     def export_progress_callback(self, name, count, current):
         layer_name = self.current_processing_layer_name
         if(layer_name == "base"):
-            layer_name = "Base Layer"
-        GLib.idle_add(self.show_message, "Exporting Photo", "%s: %s" % (layer_name,
-                                                                                    name), True, True)
-        GLib.idle_add(self.update_message_progress, current+(self.current_processing_layer_index*count),
-                      count*len(self.layers))
+            layer_name = "the base layer"
+
+        GLib.idle_add(self.ui["export_progress_label"].set_text, "Processing %s: %s" % (layer_name, name))
+
+        fraction = current+(self.current_processing_layer_index*count)
+        fraction = fraction / (count*len(self.layers))
+
+        GLib.idle_add(self.ui["export_progress"].set_fraction, fraction)
 
 
 
