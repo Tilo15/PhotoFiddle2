@@ -16,20 +16,19 @@ class Blur(Tool.Tool):
             Tool.Property("method", "Method", "Combo", 1, options=[
                 "Guassian",
                 "Average",
-                "Median"
+                # "Median"
             ]),
             Tool.Property("strength", "Strength", "Slider", 5, max=100, min=0),
 
         ]
 
     def on_update(self, image):
-        im = image
+        im = image.image
         if(self.props["enabled"].get_value()):
             strength = self.props["strength"].get_value()
             method = self.props["method"].get_value()
 
-            height, width = image.shape[:2]
-            size = (height*width)
+            size = (image.height*image.width)
             mul = numpy.math.sqrt(size) / 1064.416 #numpy.math.sqrt(1132982.0)
 
             if (strength > 0):
@@ -40,9 +39,9 @@ class Blur(Tool.Tool):
                 elif(method == 1):
                     im = cv2.blur(im, (int(blur_size), int(blur_size)))
 
-                elif(method == 2):
-                    im = cv2.medianBlur(im, int(blur_size))
-        return image.image
+                # elif(method == 2):
+                #     im = cv2.medianBlur(im, int(blur_size))
+        return im
 
 
 

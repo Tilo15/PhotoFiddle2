@@ -1,6 +1,10 @@
 import cv2
 import numpy
 
+from PF2.Scalar import Scalar
+from PF2.Utilities import HMS
+from PF2.Utilities import clip
+
 import Tool
 
 class Colours(Tool.Tool):
@@ -44,7 +48,7 @@ class Colours(Tool.Tool):
 
     def on_update(self, image):
         if(not self.is_default()):
-            im = image
+            im = image.image
             hue = self.props["hue"].get_value()
             saturation = self.props["overall_saturation"].get_value()
             ct = self.props["kelvin"].get_value()/100.0
@@ -67,13 +71,11 @@ class Colours(Tool.Tool):
             cmbl = self.props["midtone_bleed"].get_value()
             csbl = self.props["shadow_bleed"].get_value()
 
-            bpp = float(str(im.dtype).replace("uint", "").replace("float", ""))
-            np = float(2 ** bpp - 1)
+            np = image.np
 
-            out = im.astype(numpy.float32)
-            isHr = self._is_highlight(out, (3.00 / chbl))
-            isMr = self._is_midtone(out, (3.00 / cmbl))
-            isSr = self._is_shadow(out, (3.00 / csbl))
+            out = im
+
+            bleeds = ((3.00 / chbl), (3.00 / cmbl), (3.00 / csbl))
 
             # Colour Temperature
             if(int(ct) != 65):
@@ -123,129 +125,76 @@ class Colours(Tool.Tool):
                 g = (g / 255.0)
                 b = (b / 255.0)
 
+                chans = cv2.split(im)
+
                 # Red
-                out[0:, 0:, 2] = out[0:, 0:, 2] * r
+                chans[2] = cv2.multiply(chans[2], Scalar(r))
                 # Green
-                out[0:, 0:, 1] = out[0:, 0:, 1] * g
+                chans[1] = cv2.multiply(chans[1], Scalar(g))
                 # Blue
-                out[0:, 0:, 0] = out[0:, 0:, 0] * b
+                chans[0] = cv2.multiply(chans[0], Scalar(b))
+
+                out = cv2.merge(chans)
 
 
 
             #Converting to HSV
 
             out = cv2.cvtColor(out, cv2.COLOR_BGR2HSV)
+            channels = cv2.split(out)
 
             #Hue...
-            if (hue != 0.0):
-                out[0:, 0:, 0] = out[0:, 0:, 0] + (hue / 100.0) * 255
+            channels[0] = cv2.add(channels[0], Scalar((hue / 100.0) * np))
 
             #Saturation...
-            if (saturation != 0.0):
-                out[0:, 0:, 1] = out[0:, 0:, 1] + (saturation / 10000.0) * 255
+            channels[1] = self._process_colour_channel(channels[1], channels[2], saturation / 100.0, hs / 100.0, ms / 100.0, ss / 100.0, np, bleeds)
 
-            #Saturation Highlights...
-            if (hs != 0.0):
-                out[0:, 0:, 1] = (out[0:, 0:, 1] + ((hs * isHr[0:, 0:, 1]) / 10000.0) * 255)
-
-            #Saturation Midtones...
-            if (ms != 0.0):
-                out[0:, 0:, 1] = (out[0:, 0:, 1] + ((ms * isMr[0:, 0:, 1]) / 10000.0) * 255)
-
-            #Saturation Shadows...
-            if (ss != 0.0):
-                out[0:, 0:, 1] = (out[0:, 0:, 1] + ((ss * isSr[0:, 0:, 1]) / 10000.0) * 255)
-
-            out[out < 0.0] = 0.0
-            out[out > 4294967296.0] = 4294967296.0
-
+            out = cv2.merge(channels)
+            out = clip(out, 4294967296.0, 0.0, 4294967296.0)
             out = cv2.cvtColor(out, cv2.COLOR_HSV2BGR)
 
+            channels = cv2.split(out)
+
             #Red...
-            if (rob != 0.0):
-                out[0:, 0:, 2] = out[0:, 0:, 2] + (rob / 100.0) * np
-
-            # Highlights
-            if (rhb != 0.0):
-                out[0:, 0:, 2] = (out[0:, 0:, 2] + ((rhb * isHr[0:, 0:, 1]) / 100.0) * np)
-
-            # Midtones
-            if (rmb != 0.0):
-                out[0:, 0:, 2] = (out[0:, 0:, 2] + ((rmb * isMr[0:, 0:, 1]) / 100.0) * np)
-
-            # Shadows
-            if (rsb != 0.0):
-                out[0:, 0:, 2] = (out[0:, 0:, 2] + ((rsb * isSr[0:, 0:, 1]) / 100.0) * np)
+            channels[2] = self._process_colour_channel(channels[2], channels[2], rob, rhb, rmb, rsb, np, bleeds)
 
             #Green...
-            if (gob != 0.0):
-                out[0:, 0:, 1] = out[0:, 0:, 1] + (gob / 100.0) * np
-
-            # Highlights
-            if (ghb != 0.0):
-                out[0:, 0:, 1] = (out[0:, 0:, 1] + ((ghb * isHr[0:, 0:, 1]) / 100.0) * np)
-
-            # Midtones
-            if (gmb != 0.0):
-                out[0:, 0:, 1] = (out[0:, 0:, 1] + ((gmb * isMr[0:, 0:, 1]) / 100.0) * np)
-
-            # Shadows
-            if (gsb != 0.0):
-                out[0:, 0:, 1] = (out[0:, 0:, 1] + ((gsb * isSr[0:, 0:, 1]) / 100.0) * np)
+            channels[1] = self._process_colour_channel(channels[1], channels[1], gob, ghb, gmb, gsb, np, bleeds)
 
             #Blue...
-            if (bob != 0.0):
-                out[0:, 0:, 0] = out[0:, 0:, 0] + (bob / 100.0) * np
+            channels[0] = self._process_colour_channel(channels[0], channels[0], bob, bhb, bmb, bsb, np, bleeds)
 
-            # Highlights
-            if (bhb != 0.0):
-                out[0:, 0:, 0] = (out[0:, 0:, 0] + ((bhb * isHr[0:, 0:, 1]) / 100.0) * np)
+            out = cv2.merge(channels)
 
-            # Midtones
-            if (bmb != 0.0):
-                out[0:, 0:, 0] = (out[0:, 0:, 0] + ((bmb * isMr[0:, 0:, 1]) / 100.0) * np)
-
-            # Shadows
-            if (bsb != 0.0):
-                out[0:, 0:, 0] = (out[0:, 0:, 0] + ((bsb * isSr[0:, 0:, 1]) / 100.0) * np)
-
-
-            out[out < 0.0] = 0.0
-            out[out > np] = np
-            return out.astype(im.dtype)
+            return clip(out, np, 0, np)
         else:
             return image.image
 
-    def _is_highlight(self, image, bleed_value = 6.0):
-        bleed = float(image.max() / bleed_value)
-        mif = image.max() / 3.0 * 2.0
-        icopy = image.copy()
 
-        icopy[icopy < mif - bleed] = 0.0
-        icopy[(icopy < mif) * (icopy != 0.0)] = ((mif - (icopy[(icopy < mif) * (icopy != 0.0)])) / bleed) * -1 + 1
-        icopy[icopy >= mif] = 1.0
-        return icopy
+    def _process_colour_channel(self, image, value_image, value, highlight, midtone, shadow, np, bleeds):
+        # Overall Brightness
+        if(value != 0.0):
+            image = cv2.add(image, Scalar((value / 100.0) * np))
 
-    def _is_midtone(self, image, bleed_value = 6.0):
-        bleed = float(image.max() / bleed_value)
-        mif = image.max() / 3.0
-        mir = image.max() / 3.0 * 2.0
-        icopy = image.copy()
+        # Highlights
+        if(highlight != 0.0):
+            isHr = HMS.is_highlight(value_image, bleeds[0], np)
+            calc = cv2.multiply(isHr, Scalar(np))
+            calc = cv2.multiply(calc, Scalar(highlight/100.0))
+            image = cv2.add(image, calc)
 
-        icopy[icopy < mif - bleed] = 0.0
-        icopy[icopy > mir + bleed] = 0.0
+        # Midtones
+        if(midtone != 0.0):
+            isMr = HMS.is_midtone(value_image, bleeds[0], np)
+            calc = cv2.multiply(isMr, Scalar(np))
+            calc = cv2.multiply(calc, Scalar(midtone/100.0))
+            image = cv2.add(image, calc)
 
-        icopy[(icopy < mif) * (icopy != 0.0)] = ((mif - (icopy[(icopy < mif) * (icopy != 0.0)])) / bleed) * -1 + 1
-        icopy[(icopy > mir) * (icopy != 0.0)] = (((icopy[(icopy > mir) * (icopy != 0.0)]) - mir) / bleed) * -1 + 1
-        icopy[(icopy >= mif) * (icopy <= mir)] = 1.0
-        return icopy
+        # Shadows
+        if(shadow != 0.0):
+            isSr = HMS.is_shadow(value_image, bleeds[0], np)
+            calc = cv2.multiply(isSr, Scalar(np))
+            calc = cv2.multiply(calc, Scalar(shadow/100.0))
+            image = cv2.add(image, calc)
 
-    def _is_shadow(self, image, bleed_value=6.0):
-        bleed = float(image.max() / bleed_value)
-        mir = image.max() / 3.0
-        icopy = image.copy()
-
-        icopy[icopy <= mir] = 1.0
-        icopy[icopy > mir + bleed] = 0.0
-        icopy[icopy > mir] = (((icopy[(icopy > mir) * (icopy != 0.0)]) - mir) / bleed) * -1 + 1
-        return icopy
+        return image
