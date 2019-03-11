@@ -5,14 +5,10 @@ from PF2.Utilities import clip
 
 class Image:
     def __init__(self, image, gpuEnabled = True):
-
-        if(gpuEnabled):
-            self.image = cv2.UMat(image)
-            self.image = cv2.add(Scalar(0), self.image, dtype=cv2.CV_32F)
-        else:
-            self.image = image.copy()
-            self.image = self.image.astype(numpy.float32)
-
+        # Use GPU?
+        self.gpu_enabled = gpuEnabled
+        # Set the image
+        self.set(image)
         # Bits per pixel
         self.bpp = float(str(image.dtype).replace("uint", "").replace("float", ""))
         # Pixel value range
@@ -28,3 +24,11 @@ class Image:
             out = out.get()
 
         return out.astype(self.dtype)
+
+    def set(self, image):
+        if(self.gpu_enabled):
+            self.image = cv2.UMat(image)
+            self.image = cv2.add(Scalar(0), self.image, dtype=cv2.CV_32F)
+        else:
+            self.image = image.copy()
+            self.image = self.image.astype(numpy.float32)

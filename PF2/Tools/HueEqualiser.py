@@ -49,9 +49,11 @@ class HueEqualiser(Tool.Tool):
             "_red": 360,
         }
 
-        out = image
 
         if(not self.is_default()):
+            # TODO update this tool to be GPU enabled
+            out = image.get()
+
             bleed = self.props["bleed"].get_value()
             neighbour_bleed = self.props["neighbour_bleed"].get_value()
 
@@ -99,8 +101,7 @@ class HueEqualiser(Tool.Tool):
 
             out = out.astype(image.dtype)
 
-
-
+            image.set(out)
 
         return image.image
 
